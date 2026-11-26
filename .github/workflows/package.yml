@@ -143,12 +143,18 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           OS_TARGET: ${{ inputs.os || '17' }}
           DATA_SEED: ${{ runner.temp }}/tb371fc-data-seed-artifact/data-21H461.dbr
+          TRUST_BUNDLE: ${{ runner.temp }}/tb371fc-trust-21H461.bin
           J716F_GPU_FIRMWARE_DIR: ${{ github.workspace }}/device/package/firmware/gpu
         run: |
           if [ "${{ inputs.check_only }}" = "true" ]; then
             scripts/package.sh --os "$OS_TARGET" --check --uefi ../uefi-j716f
           else
-            scripts/package.sh --os "$OS_TARGET" --uefi ../uefi-j716f --data-ramdisk "$DATA_SEED"
+            python3 ../UniXNU/unixnu defconfig j716f_defconfig -D "$PWD" --os "$OS_TARGET"
+            python3 ../UniXNU/unixnu ipsw fetch -D "$PWD" --os "$OS_TARGET"
+            python3 ../UniXNU/scripts/bundle-ipsw-trust.py "$TRUST_BUNDLE" \
+              ../UniXNU/out/ipsw/21H461/044-76040-038.dmg.trustcache \
+              ../UniXNU/out/ipsw/21H461/044-76034-038.dmg.trustcache
+            scripts/package.sh --os "$OS_TARGET" --uefi ../uefi-j716f --data-ramdisk "$DATA_SEED" --trust-cache "$TRUST_BUNDLE"
           fi
 
       - name: Upload images

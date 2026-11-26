@@ -106,7 +106,7 @@ void reset(void *context, int asserted) {
     wr(s->resetPin.va, 0, (TB371FC_TOUCH_DRIVE_6MA << 6) | (1u << 9));
 }
 
-void publishFrame(const Tb371fcTouchFrame &frame) {
+void publishFrame(const Session &s, const Tb371fcTouchFrame &frame) {
     if (__atomic_load_n(&native_touch_injecting, __ATOMIC_ACQUIRE)) return;
     uint32_t seq = native_touch_seq;
     if (seq & 1u) ++seq;
@@ -115,9 +115,17 @@ void publishFrame(const Tb371fcTouchFrame &frame) {
 
     unsigned count = frame.count;
     if (count > TB371FC_TOUCH_CONTACTS) count = TB371FC_TOUCH_CONTACTS;
+    const bool landscapeDirect = (s.info.abs_x_max == 2944u && s.info.abs_y_max == 1840u);
     for (unsigned i = 0; i < count; ++i) {
         uint16_t x = 0, y = 0;
-        tb371fc_touch_to_hid(frame.contacts[i].x, frame.contacts[i].y, &x, &y);
+        if (landscapeDirect) {
+            uint16_t rx = frame.contacts[i].x > 2944u ? 2944u : frame.contacts[i].x;
+            uint16_t ry = frame.contacts[i].y > 1840u ? 1840u : frame.contacts[i].y;
+            x = static_cast<uint16_t>(((uint32_t)rx * (TB371FC_HID_INPUT_X_MAX - 1u) + 1472u) / 2944u);
+            y = static_cast<uint16_t>(((uint32_t)ry * (TB371FC_HID_INPUT_Y_MAX - 1u) + 920u) / 1840u);
+        } else {
+            tb371fc_touch_to_hid(frame.contacts[i].x, frame.contacts[i].y, &x, &y);
+        }
         native_touch_ids[i] = frame.contacts[i].id;
         native_touch_xs[i] = x;
         native_touch_ys[i] = y;
@@ -223,8 +231,10 @@ bool download(Session &s) {
     rc = nvt_start_reports(&s.chip, &s.info);
     IOLog("[TB371FC touch] firmware=%02x pid=%04x range=%ux%u cascade=%u start=%d\n", s.info.fw_ver,
           s.info.pid, s.info.abs_x_max, s.info.abs_y_max, s.chip.cascade, rc);
-    if (rc || (s.info.pid != 0x6068u && s.info.pid != 0x6067u) ||
-        s.info.abs_x_max != 18400u || s.info.abs_y_max != 29440u)
+    const bool rangeOk =
+        (s.info.abs_x_max == 2944u && s.info.abs_y_max == 1840u) ||
+        (s.info.abs_x_max == 18400u && s.info.abs_y_max == 29440u);
+    if (rc || (s.info.pid != 0x6068u && s.info.pid != 0x6067u) || !rangeOk)
         return stage(7, rc ? rc : -19);
     armAttention(s);
     return stage(8);
@@ -260,7 +270,7 @@ void run(void *, wait_result_t) {
         tb371fc_touch_reads = tb371fc_touch_reads + 1;
         if (rc) {
             Tb371fcTouchFrame empty = {};
-            if (published) { publishFrame(empty); published = 0; }
+            if (published) { publishFrame(*s, empty); published = 0; }
             if (++errors >= 3) { stage(9, rc); return; }
             continue;
         }
@@ -269,7 +279,7 @@ void run(void *, wait_result_t) {
         if (recovery) {
             tb371fc_touch_recoveries = tb371fc_touch_recoveries + 1;
             Tb371fcTouchFrame empty = {};
-            if (published) { publishFrame(empty); published = 0; }
+            if (published) { publishFrame(*s, empty); published = 0; }
             if (recovery == 2 && ++watchdog >= 10) { watchdog = 0; if (!download(*s)) return; }
             continue;
         }
@@ -277,7 +287,7 @@ void run(void *, wait_result_t) {
         Tb371fcTouchFrame frame = {};
         if (tb371fc_touch_decode(report, sizeof report, &frame)) { tb371fc_touch_bad = tb371fc_touch_bad + 1; continue; }
         tb371fc_touch_valid = tb371fc_touch_valid + 1;
-        if (frame.count || published) publishFrame(frame);
+        if (frame.count || published) publishFrame(*s, frame);
         published = frame.count;
     }
 }
