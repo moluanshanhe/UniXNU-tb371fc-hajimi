@@ -1,0 +1,753 @@
+schema_version = 1
+
+[device]
+name = "j716f"
+soc = "SM8250"
+os_profile = "ipados-17.7.11-21H461"
+summary = "Lenovo Xiaoxin Pad Pro 2021 (TB-J716F, SM8250-AC) consolidated onto the official UniXNU Format 2 device repository layout alongside the r38 companion UEFI repository (Denis0x00/uefi-j716f). Hardware-verified through UEFI menu, retained early XNU logs (JXLG), real iPadOS 17.7.11 APFS root mount, 8-core Kryo 585 SMP + Edge scheduler + SM8250-AC EPSS CPUfreq/L3 scaling, GopFramebuffer + AppleKeyStoreState, Goodix GT7386 I2C touch, PM8150 SPMI hardware buttons (Power/VolUp/VolDown + lock/wake), kernel-side skip-setup plist seeding, and interactive iPadOS 17.7.11 SpringBoard desktop with wallpaper. Next milestones: persistent Data storage (converging onto ShengUfs), backlight/Wi-Fi/audio, and Adreno 650 GPU acceleration."
+
+[[area]]
+id = "configuration"
+status = "host-verified"
+components = ["ArmDTPlatform", "ArmCpu", "SoftwareAES", "RamBlock", "GopFramebuffer", "AppleKeyStoreState", "XnuPrelink", "DarwinBoot", "AdrenoFirmware", "AdrenoPM4", "ArmSmmu4K"]
+paths = [
+  "board.toml",
+  "feeds.toml",
+  "unixnu.lock",
+  "configs/**",
+  "patches/**",
+  "socs/sm8250/soc.toml",
+  "socs/sm8250/configs/**",
+  "socs/sm8250/patches/**",
+  "AGENTS.md",
+  "README.md",
+  "LICENSE",
+  ".gitattributes",
+  ".gitignore",
+  ".github/**",
+  "local.toml.example",
+  "proprietary-files.txt",
+]
+inputs = [
+  "Lenovo Xiaoxin Pad Pro 2021 (TB-J716F), Snapdragon 870 (SM8250-AC), arm64, iPadOS 17.7.11 (21H461).",
+  "Upstream UniXNU Format 2 build system (UniXNU/UniXNU) and companion firmware repository (Denis0x00/uefi-j716f).",
+]
+configuration = [
+  "board.toml uses schema_version = 2 with example = false, os_profile = ipados-17.7.11-21H461, and 11 SoC-compatible components (ArmDTPlatform, ArmCpu, SoftwareAES, RamBlock, GopFramebuffer, AppleKeyStoreState, XnuPrelink, DarwinBoot, AdrenoFirmware, AdrenoPM4, ArmSmmu4K); upstream Adreno740/AdrenoMetal/ShengHidInput remain excluded from board.toml [components] because upstream components.toml hard-couples them to Sm8550Platform and ShengNovatekTouch.",
+  "configs/j716f_defconfig targets the default hardware-verified Stage 7+ desktop build (RAM Data + SystemOS union + GopFramebuffer + AppleKeyStoreState); configs/j716f_stage6_defconfig preserves the minimal Stage 6 single-core APFS root baseline, and configs/j716f_stage7_defconfig is retained as a backwards-compatible alias.",
+  "feeds.toml points the sm8250 SoC feed to socs/sm8250; unixnu.lock pins upstream Apple OSS and mu_basecore commits.",
+]
+procedure = [
+  "Run ./unixnu defconfig j716f_defconfig -D ../UniXNU-j716f --os 17 followed by ./unixnu status --json --os 17 and ./unixnu tree --os 17.",
+  "Run ./unixnu build package --os 17, ./unixnu build firmware --os 17 --uefi ../uefi-j716f, and ./unixnu build kernel --os 17.",
+]
+findings = [
+  "Consolidated the split experimental targets into a single official UniXNU Format 2 device repository with clean root-level board.toml, package/, patches/, and scripts/.",
+  "Removed local-only core PCD coupling (J716F_MENU_DIAGNOSTIC) from default board.toml firmware defines so the board builds cleanly against unmodified upstream UniXNU/UniXNU.",
+  "Excluded proprietary vendor DTB binaries and private device seeds from Git; documented user extraction in proprietary-files.txt.",
+  "Enabled official UniXNU porting-record.yml CI alongside j716f-ci.yml (Format 2 tree assembly, DTS/ADT generation, and C++ ASan/UBSan storage/SMMU unit tests).",
+  "Verified Format 2 tree layout path out/j716f/ipados-17.7.11-21H461/j716f/tree in CI.",
+  "Initialized the 5 required UniXNU component submodules in CI before running ./unixnu status and ./unixnu tree, and passed hex string unique_chip_id to devicetree.generate().",
+  "Extracted two self-contained upstream PR patches under patches/unixnu-core/ (AAPL,phandle emission in devicetree.py and Android bootimg v2 support + unit tests in bootimg.py) and added standard .github/workflows/package.yml; CI verifies clean git apply, test_bootimg.py, and AAPL,phandle presence in the generated ADT against upstream UniXNU/UniXNU.",
+  "Added Stage 7 host-build defconfig (configs/j716f_stage7_defconfig), RamBlock embedded component selection, and platform ADT defaults (vmm-present=1, sleep-disabled=1, kernel-ctrr-to-be-enabled=0, packed_data_ramdisk=true, owned_memory_size=2 GiB).",
+  "Wired GopFramebuffer and AppleKeyStoreState into board.toml embedded_components, enabled CONFIG_XNU_NATIVE_LEGACY_DISPLAY=y in configs/j716f_stage7_defconfig, added [adt.product] display properties, and enabled the upstream GopFramebuffer fence-wait sanitizer check in j716f-ci.yml.",
+  "Updated README.md with verified Stage 6 APFS root mount and Stage 7+ Apple logo hardware milestones plus j716f_stage7_defconfig build instructions.",
+  "Enabled soc:patches/xnu/series (8-core SMP + Edge scheduler) and [adt.buttons] in board.toml, omitted -v from default payload kernel_args for clean kPEGraphicsMode desktop output, and expanded j716f-ci.yml to validate input/power package sources and 8-core/buttons ADT nodes.",
+  "Expanded j716f-ci.yml to verify package/usb staging, run the C ASan/UBSan J716fUsbDebugWireTest harness, and run the Python GSC1/PNG host unit tests (scripts/ci/test_usb_debug_wire.py).",
+  "Expanded j716f-ci.yml to verify package/power/J716fBattery.cpp and package/gpu/J716fGpuProbe.cpp staging and run ASan/UBSan host tests J716fBatteryBoardTest and J716fGpuPowerBoardTest (9 C/C++ host tests total).",
+  "Selected official upstream AdrenoFirmware, AdrenoPM4, and ArmSmmu4K kits in board.toml and added Test 10 (J716fA650GmuTest under ASan/UBSan against upstream kits/AdrenoFirmware) in j716f-ci.yml.",
+  "Added Test 11 (J716fA650GmuContextTest under ASan/UBSan against unmodified upstream kits/ArmSmmu4K) in j716f-ci.yml and documented optional local J716F_GPU_FIRMWARE_DIR extraction in proprietary-files.txt.",
+  "Added Test 12 (J716fA650CpTest under ASan/UBSan against unmodified upstream kits/ArmSmmu4K and kits/AdrenoPM4) in j716f-ci.yml.",
+  "Added Test 13 (J716fA650ZapTest under ASan/UBSan covering ELF32 MDT parsing, SM8250 SCM PAS 13 auth, PIL unmap ordering, and CP SMMU aperture) and initialized upstream drivers/Adreno740 and drivers/AdrenoMetal submodules in j716f-ci.yml.",
+  "Added .github/workflows/j716f-gpu-addon.yml (macOS runner) to build Phase 4b userspace gpuaddon.bin (NativeAdrenoMetal.bundle + Mesa Turnip + metal2vulkan for arm64-apple-ios17.0) and trust.json CDHashes.",
+  "Updated .github/workflows/j716f-gpu-addon.yml with Cargo registry caching and generated metal2vulkan-runtime iOS patch 0065 (copied.rs vm_read_overwrite + host_memory.rs mach_vm_region).",
+  "Added drivers/GopFramebuffer submodule, Rust thin LTO, and prebuilt bridge caching to .github/workflows/j716f-gpu-addon.yml.",
+  "Allowed classic LC_DYLD_INFO_ONLY (no chained fixups) in macho-self-bind-weak-imports.py for arm64-apple-ios17.0 Turnip dylib in .github/workflows/j716f-gpu-addon.yml.",
+  "Updated j716f-gpu-addon.yml to guard the iPadOS 27 (24A446) QuartzCore ptrauth_strip block for arm64-apple-ios17.0 builds.",
+  "Raised board.toml owned_memory_size from 2 GiB (0x80000000) to 3.5 GiB (0xE0000000) inside uefi-j716f High RAM (~3.88 GiB, ~284 MiB loader headroom), added Test 14 (J716fPersistentStore) and owned_memory_size assertion to j716f-ci.yml.",
+  "Updated .github/workflows/j716f-gpu-addon.yml pin to upstream UniXNU b04f131da915 (Adreno740 2962e289, AdrenoMetal 0b7094bf, UniXNU/metal2vulkan 87a869f7) and dropped the obsolete 0065 metal2vulkan-runtime iOS patch now handled natively by NativeMetalHostMapping.rs.",
+  "Promoted Stage 7+ desktop configuration to default configs/j716f_defconfig and board.toml ([payload] kernel_args + [payload.install]), preserved minimal single-core configs/j716f_stage6_defconfig, added board-level core patches 0003-components-decouple-board-dependencies.patch and 0004-prepare-xnu-source-blob-cache.patch under patches/unixnu-core/, and added scripts/package.sh --no-deps --check plus cmdline-length assertions to j716f-ci.yml.",
+  "Fixed j716f-ci.yml Stage 6 tree check to omit --os 17 so ./unixnu tree uses the active j716f_stage6_defconfig rather than [package.defconfig].",
+  "Enabled upstream oc-like boot menu theme (boot_menu_theme = \"oc-like\") in board.toml [payload] and added optional --boot-menu-theme override to scripts/pack-j716f-gpu-addon.py; verified UiOcLike.c + FontOcLike.c compile into 7 MiB SILICIUM_UEFI.fd (FVMAIN_COMPACT 6% full, 448,944 / 7,340,032 bytes).",
+  "Updated j716f-gpu-addon.yml to register 0001-a650-optional-storage-8bit.patch (moving storageBuffer8BitAccess from REQUIRED to OPTIONAL in metal2vulkan-runtime/src/floor.rs for Adreno 650 a6xx_gen3) and shorten NativeMetalBridge.rs refusal telemetry.",
+]
+completion = [
+  "Official ./unixnu defconfig, status, tree, package, firmware, kernel, payload, and bootimg succeed cleanly from this single Format 2 repository.",
+]
+limits = [
+  "Hardware bootimg assembly requires a user-supplied normalized stock DTB (DTB0 + DTBO1) and UNIXNU_UNIQUE_CHIP_ID outside Git.",
+  "Board-level UniXNU core patches (patches/unixnu-core/0001..0004) are maintained locally for real-hardware ADT, Android bootimg v2, components.toml decoupling, and offline blob caching while keeping default board.toml compatible with unmodified upstream UniXNU/UniXNU.",
+]
+next_action = [
+  "Complete Phase 4b GPU addon hardware activation (j716f-gpu-metal=1), add unixnu GitHub topic, and converge storage onto upstream ShengUfs.",
+]
+[[area.evidence]]
+kind = "source"
+reference = "board.toml"
+result = "Format 2 board manifest defining Stage 7+ default kernel, firmware, device tree, userdata geometry, payload, and bootimg settings"
+[[area.evidence]]
+kind = "source"
+reference = "configs/j716f_defconfig"
+result = "Default Stage 7+ desktop kernel defconfig (with configs/j716f_stage6_defconfig preserving the minimal Stage 6 baseline)"
+[[area.evidence]]
+kind = "source"
+reference = "patches/unixnu-core/0001-devicetree-emit-aapl-phandle.patch"
+result = "Board-level UniXNU core patch emitting AAPL,phandle aliases for XNU FindPHandle"
+[[area.evidence]]
+kind = "source"
+reference = "patches/unixnu-core/0002-bootimg-support-header-version-2.patch"
+result = "Board-level UniXNU core patch adding Android boot header v2 support and offline layout unit tests"
+[[area.evidence]]
+kind = "source"
+reference = "patches/unixnu-core/0003-components-decouple-board-dependencies.patch"
+result = "Board-level UniXNU core patch decoupling Adreno740 and ShengHidInput from SM8550/sheng-specific component dependencies"
+[[area.evidence]]
+kind = "source"
+reference = "patches/unixnu-core/0004-prepare-xnu-source-blob-cache.patch"
+result = "Board-level UniXNU core patch adding SHA-1 blob caching to prepare-xnu-source.py"
+[[area.evidence]]
+kind = "host"
+reference = ".github/workflows/j716f-ci.yml"
+revision = "d57aa9209ac1263f81ffde0d1622e0c614daa459"
+command = "python3 scripts/porting-record.py check --device ../UniXNU-j716f && ./unixnu defconfig j716f_defconfig -D ../UniXNU-j716f --os 17 && ./unixnu tree --os 17"
+result = "GitHub Actions j716f-ci.yml and Device documentation workflows passed on ubuntu-24.04 (14 structured areas, Format 2 CLI, ADT generation, 14 ASan/UBSan suites)"
+
+[[area]]
+id = "firmware"
+status = "device-verified"
+components = ["DarwinBoot"]
+paths = ["dts/**", "socs/sm8250/dts/**", "package/.gitkeep", "package/README.md"]
+inputs = [
+  "Companion Mu-Silicium firmware repository https://github.com/Denis0x00/uefi-j716f (Platforms/Lenovo/j716fPkg/j716f.dsc).",
+  "Upstream UniXNU package/UniXNUPkg, drivers/DarwinBoot, and pinned microsoft/mu_basecore feed.",
+]
+configuration = [
+  "Targets AARCH64 DEBUG_CLANGPDB producing a 7 MiB (0x700000 / 7,340,032-byte) SILICIUM_UEFI.fd at 0xCE000000.",
+  "Includes J716fEarlyHandoffLib, J716fRamLogLib, J716fEarlyLogSecLib, J716fHandoffDiagnosticsDxe, and r35-r38 J716fR35RecordDxe/Lib.",
+]
+procedure = [
+  "Build via ./unixnu build firmware --os 17 --uefi ../uefi-j716f or the standalone EDK II build verified in uefi-j716f CI.",
+  "Verify memory descriptor non-overlap and early handoff sanitizer tests in Denis0x00/uefi-j716f.",
+]
+findings = [
+  "r38 UEFI firmware preserves early XNU logs across resets and publishes the SEC-captured UFS HCI + APPS SMMU handoff record in the RAM slot (0xB007E000).",
+  "Menu entry, volume/power key navigation, clean rendering, Advanced Logger QR export, and 80 MiB initrd ReadyToBoot CRC32 checks passed in staged hardware trials.",
+  "Enabled all 8 Kryo 585 cores (cpu0..cpu7) in dts/j716f.dts and verified r38 SILICIUM_UEFI.fd handoff through 8-core SMP iPadOS 17.7.11 SpringBoard desktop with wallpaper.",
+]
+completion = [
+  "SILICIUM_UEFI.fd builds cleanly against upstream UniXNU/UniXNU in CI and reliably hands off to DarwinBoot and XNU.",
+]
+limits = [
+  "Optional J716F_MENU_DIAGNOSTIC hold mode requires applying uefi-j716f/Resources/UniXNUPatches/j716f-menu-hold.patch to the local UniXNU core tree.",
+]
+next_action = [
+  "Keep firmware CI green against upstream UniXNU/UniXNU and transition UFS handoff once upstream ShengUfs SM8250 driver support lands.",
+]
+[[area.evidence]]
+kind = "source"
+reference = "dts/j716f.dts"
+result = "TB-J716F board device tree overlay targeting SM8250"
+[[area.evidence]]
+kind = "source"
+reference = "https://github.com/Denis0x00/uefi-j716f"
+result = "Companion TB-J716F r38 UEFI firmware repository with EDK II CI build"
+[[area.evidence]]
+kind = "device"
+reference = "dts/j716f.dts"
+revision = "d57aa9209ac1263f81ffde0d1622e0c614daa459"
+command = "fastboot flash boot_b boot.img && fastboot set_active b && fastboot reboot"
+result = "TB-J716F r38 SILICIUM_UEFI.fd (7 MiB) verified on hardware through menu, QR export, JXLG retention, R35-R38 UFS handoff, and DarwinBoot XNU handoff into iPadOS 17.7.11 desktop"
+
+[[area]]
+id = "cpu"
+status = "device-verified"
+components = ["ArmCpu"]
+paths = ["socs/sm8250/dts/sm8250.dtsi", "socs/sm8250/patches/**"]
+inputs = [
+  "SM8250-AC Kryo 585 (1x Prime + 3x Gold + 4x Silver), GICv3, ARM generic timer, PSCI via SMC.",
+]
+configuration = [
+  "All 8 Kryo 585 cores (4x Cortex-A55 E + 4x Cortex-A77 P) are enabled in dts/j716f.dts and socs/sm8250/patches/xnu/series (native-smp-secondary.patch + native-smp-type-clusters.patch) is included in board.toml; secondary bring-up remains opt-in via smp=1 armcpu-spi-ipi=1 armcpu-self-ipi=1 armcpu-edge=1.",
+]
+procedure = [
+  "Compile dts/j716f.dts with socs/sm8250/dts include path and generate Apple Device Tree (ADT) via scripts/unixnu/devicetree.py.",
+]
+findings = [
+  "CPU0 bring-up passed MMU enable, arm_init, PE_init_iokit, machine_lockdown, StartIOKitMatching, bsd_init, sysctl_mib_init, and IOKitBSDInit checkpoints.",
+  "GIC phandle / AAPL,phandle alignment resolved the early IODTGetICellCounts data abort.",
+  "Hardware-verified 8-core SMP + Edge scheduler + SM8250-AC EPSS CPUfreq boot_b image (e04afbfd..., log 894661e1...): cut early launchd boot time ~2.3x (sysstatuscheck 3.10B -> 1.37B ticks) and delivered responsive interactive SpringBoard desktop with wallpaper.",
+]
+completion = [
+  "All 8 Kryo 585 cores (4E + 4P) and Edge cluster scheduling boot stably into iPadOS 17.7.11 desktop.",
+]
+limits = [
+  "Secondary CPU PSCI CPU_SUSPEND deep idle states and thermal throttling telemetry are not yet enabled.",
+]
+next_action = [
+  "Capture per-core/cluster telemetry and evaluate PSCI idle/thermal management.",
+]
+[[area.evidence]]
+kind = "source"
+reference = "socs/sm8250/dts/sm8250.dtsi"
+result = "SM8250 SoC DTSI defining CPU0..CPU7, GICv3, generic timer, and PSCI method"
+[[area.evidence]]
+kind = "device"
+reference = "socs/sm8250/dts/sm8250.dtsi"
+revision = "d57aa9209ac1263f81ffde0d1622e0c614daa459"
+command = "boot_b (sha256 e04afbfd) with smp=1 armcpu-spi-ipi=1 armcpu-self-ipi=1 armcpu-edge=1 cpufreq=4"
+result = "All 8 Kryo 585 cores (4E + 4P) and Edge scheduler verified on TB-J716F hardware (~2.26x faster boot into SpringBoard desktop)"
+
+[[area]]
+id = "memory"
+status = "device-verified"
+components = []
+paths = ["socs/sm8250/kits/Sm8250Platform/AppsSmmuLock.h", "socs/sm8250/kits/Sm8250Platform/AppsSmmuOwner.h", "socs/sm8250/kits/Sm8250Platform/AppsSmmuOwner.cpp", "socs/sm8250/kits/Sm8250Platform/tests/AppsSmmuOwner.cpp", "socs/sm8250/kits/Sm8250Platform/tests/AppsSmmuOwnerPeer.cpp"]
+inputs = [
+  "TB-J716F 6 GiB LPDDR5 DRAM layout, 3.5 GiB contiguous XNU owned window (0xE0000000 in board.toml inside uefi-j716f High RAM 0xFFC20000..0x1F8000000; earlier Stage 7 used 2 GiB / 0x80000000 and Stage 6 used 256 MiB / 0x10000000), APPS SMMU (0x15000000).",
+]
+configuration = [
+  "board.toml [payload.adt] requests owned_memory_size = 0xE0000000 (3.5 GiB = 3584 MiB), leaving ~284 MiB headroom for DarwinBoot 2 MiB alignment and temporary loader allocations; XNU native-4k-bootstrap-capacity.patch supports up to 6 GiB.",
+  "AppsSmmuOwner coordinates exclusive APPS SMMU handoff and DMA lifetime tracking for SM8250 UFS.",
+]
+procedure = [
+  "Compile and execute AppsSmmuOwner host sanitizer tests across translation units in CI.",
+]
+findings = [
+  "Firmware memory map reserves ABL FDT, 80 MiB initrd, Display Reserved, Boot Log, DXE Heap, UEFI FD, and XNU Window without overlap.",
+  "AppsSmmuOwner enforces single-owner acquisition, publication, DMA tracking, quarantine, and release semantics.",
+  "Audited uefi-j716f MemoryMapLib.c High RAM (0xFFC20000..0x1F8000000 = 3971.875 MiB) and DarwinBoot 2 MiB block alignment, unlocking 3.5 GiB (0xE0000000, +75% RAM) contiguous XNU memory without modifying UEFI firmware memory-map descriptors.",
+]
+completion = [
+  "All memory reservations remain non-overlapping and APPS SMMU DMA handoff operates stably under XNU storage I/O.",
+]
+limits = [
+  "General-purpose IOMMU/SMMU page-table management for additional peripherals (GPU/USB/Wi-Fi) is not yet implemented.",
+]
+next_action = [
+  "Evaluate adopting the low DRAM bank (0x80000000) beyond the current 3.5 GiB High RAM window via DarwinBoot owned_memory_outside_ranges / excluded_ranges (following sheng/uefi-sheng) for heavy 3D Metal workloads.",
+]
+[[area.evidence]]
+kind = "source"
+reference = "socs/sm8250/kits/Sm8250Platform/AppsSmmuOwner.cpp"
+result = "SM8250 APPS SMMU handoff ownership and DMA lifetime state machine"
+[[area.evidence]]
+kind = "source"
+reference = "socs/sm8250/kits/Sm8250Platform/tests/AppsSmmuOwner.cpp"
+result = "Multi-TU host ASan/UBSan test suite for AppsSmmuOwner"
+[[area.evidence]]
+kind = "device"
+reference = "board.toml"
+revision = "d57aa9209ac1263f81ffde0d1622e0c614daa459"
+command = "boot_b with uefi-j716f High RAM (0xFFC20000..0x1F8000000) and owned_memory_size=0xE0000000"
+result = "Non-overlapping UEFI memory map and APPS SMMU single-owner DMA handoff verified on TB-J716F hardware through SpringBoard desktop"
+
+[[area]]
+id = "storage"
+status = "device-verified"
+components = ["RamBlock"]
+paths = [
+  "package/storage/**",
+  "scripts/build-j716f-storage-active.py",
+  "socs/sm8250/kits/Sm8250Platform/Sm8250Ufs*.cpp",
+  "socs/sm8250/kits/Sm8250Platform/Sm8250Ufs*.h",
+  "socs/sm8250/kits/Sm8250Platform/tests/Sm8250Ufs*.cpp",
+]
+inputs = [
+  "SM8250 UFS host controller (0x1d84000), APPS SMMU (0x15000000), LUN 0 userdata GPT geometry (LBA 2315048..30693370, 4096 B/LBA).",
+  "SEC-published r38 RAM handoff record at 0xB007E000 and SHNGROOT manifest at userdata LBA 0.",
+]
+configuration = [
+  "scripts/build-j716f-storage-active.py compiles package/storage/ (staged to kits/j716f/storage) and socs/sm8250/kits/Sm8250Platform/ into libJ716fStorageBringup.a.",
+  "board.toml [userdata] records measured LUN 0 userdata LBA bounds; [payload.adt] pins root_match_volume_uuid.",
+]
+procedure = [
+  "Run C++ ASan/UBSan host tests (Sm8250UfsDiagnostics, Sm8250UfsHandoff, Sm8250UfsHci, Sm8250UfsPipeline, R41RootWindowModel) in CI.",
+  "Build kernel with ./unixnu build package && ./unixnu build kernel to verify ARM64 Mach-O archive linkage and symbol exports.",
+]
+findings = [
+  "Consolidated r41 read-only SHNGROOT window IOBlockStorageDevice sources directly under package/storage/ so ./unixnu builds cleanly without --local-module overrides.",
+  "Staged r41 hardware trial verified SHNGROOT userdata reads (223 blocks, 0 errors) and APFS SystemOS (disk1s1) / OS (disk3s1) container discovery.",
+  "Removed legacy _inittodr diagnostic reset hook so the consolidated build proceeds straight into vfs_mountroot().",
+  "Added self-contained --synthetic R35Record fixture mode to R41RootWindowModel.cpp so all 4 SHNGROOT verification modes run under ASan/UBSan in public CI without binary fixtures.",
+  "Verified all 4 R41RootWindowModel ASan/UBSan modes (happy-path, bad-manifest-sha, overlap-windows, no-shngroot) with SMMUv2 IDR1/IDR2 synthetic geometry.",
+  "Prepared Stage 7 storage bridge in R41Entry.cpp and build-j716f-storage-active.py: embedded unmodified upstream NativeRamBlock.cpp (late-init), added j716f-r41-continue=1 boot-arg, and implemented native_verified_block_root_authorized/manifest_sha384/volume_device for owner SystemOS union mount and RAM Data mount.",
+  "Tightened R41Entry.cpp PackedRAMDisk/RAMDisk startup guard to require a non-zero 16-byte (base, size) range in /chosen/memory-map so NativeRamBlock stays dormant when no initrd Data seed is loaded.",
+  "Hardware-verified Stage 6 consolidated boot_b image (caafb1ca...): vfs_mountroot() mounted real iPadOS 17.7.11 APFS OS root disk3s1 (DawnUpdate21H461.J120J121J207J208OS) and read /sbin/launchd (561,856 B, magic=0xfeedfacf) and SystemVersion.plist (574 B) with 0 errors and 0 UFS writes (tcmd=270, tblk=477, quar=0, disp4=1).",
+  "Hardware-verified Stage 7+ boot_b image (06052400...) booted /sbin/launchd and mounted disk5s1 (/private/var), revealing NativeRamBlock isBig (>2 GiB seed) rejects writes without a direct store (kIOReturnNotReady); added a volatile 2-level sparse RAM-backed native_ufs_store_* backend (512 MiB cap, 0 UFS writes) in R41Entry.cpp with data-reset=1 data-fua=1.",
+  "Hardware-verified Stage 7+ RAM-store boot_b image (2274a64d..., log e1d6a856...): disk5s1 (E146D844-B009-41DE-900A-8E49DCFEBA81) completed 140+ APFS tx flushes (up to xid 145) cleanly and booted to the real iPadOS 17.7.11 Hello screen. After xid 145, disk1 reported an I/O error (err=16) followed by disk1/disk3 'device is not ready' due to R41UfsTransport permanent quarantine (command_max_polls=200000 tight busy-poll / 2s timeout under CPU0 load).",
+  "Hardware-verified R41UfsTransport poll-yield/retry hardening + kernel-side j716f-skip-setup=1 (ce4e1a65..., log 2dfe083b...): eliminated post-Hello UFS quarantine (0 UFS errors, disk5 reached xid 245 / 240+ APFS flushes) and booted straight into iPadOS 17.7.11 SpringBoard desktop.",
+  "Implemented opt-in persistent UFS Data store (j716f-data-persist=1 RO probe / =2 RW direct, strictly OFF by default so normal boots keep the 512 MiB volatile RAM store with 0 UFS writes) in R41UfsTransport and R41Entry.cpp: one-shot immutable WriteWindow strictly bounded between SHNGROOT + 64 MiB guard and userdata_end - 1 GiB tail reserve, defense-in-depth WRITE(10) FUA/cached + SYNCHRONIZE CACHE(10) UPIU allow-list, real LUN 0 LBA 1 GPT CRC32 check in native_ufs_store_gpt_check(), and permanent write lockout on quarantine; verified under ASan/UBSan by Test 14 (J716fPersistentStoreTest.cpp) on full 128 GiB TB-J716F LUN 0 geometry.",
+]
+completion = [
+  "XNU mounts APFS root volume via IOBlockStorageDevice and supports opt-in persistent UFS Data writeback (converging onto upstream ShengUfs).",
+]
+limits = [
+  "SHNGROOT root windows remain strictly read-only; persistent UFS Data writeback (j716f-data-persist=2) is host/ASan-verified and awaits first live tablet trial (default remains volatile 512 MiB RAM store).",
+]
+next_action = [
+  "Run first live hardware trial with j716f-data-persist=1 (RO probe) followed by j716f-data-persist=2 (RW persistence across reboot) and converge onto upstream ShengUfs SM8250.",
+]
+[[area.evidence]]
+kind = "source"
+reference = "package/storage/r41/R41RootWindowDevice.cpp"
+result = "Read-only SHNGROOT IOBlockStorageDevice window provider for XNU"
+[[area.evidence]]
+kind = "source"
+reference = "package/storage/r41/tests/R41RootWindowModel.cpp"
+result = "Host ASan/UBSan test verifying SHNGROOT manifest SHA-256 and 512-byte window slicing"
+[[area.evidence]]
+kind = "source"
+reference = "package/storage/r41/tests/J716fPersistentStoreTest.cpp"
+result = "Host ASan/UBSan Test 14 verifying immutable UFS write-window guard, WRITE(10)/SYNC, and quarantine lockout"
+[[area.evidence]]
+kind = "source"
+reference = "socs/sm8250/kits/Sm8250Platform/tests/Sm8250UfsPipeline.cpp"
+result = "End-to-end host integration test for SM8250 UFS handoff, HCI, and SMMU owner"
+[[area.evidence]]
+kind = "device"
+reference = "package/storage/r41/R41Entry.cpp"
+revision = "d57aa9209ac1263f81ffde0d1622e0c614daa459"
+command = "boot_b (sha256 ce4e1a65) mounting APFS OS disk3s1, SystemOS disk1s1, and volatile RAM Data disk5s1"
+result = "Hardware-verified real iPadOS 17.7.11 APFS root mount and 240+ disk5 APFS tx flushes with 0 UFS errors and 0 UFS writes"
+
+[[area]]
+id = "display"
+status = "device-verified"
+components = ["GopFramebuffer", "AppleKeyStoreState"]
+paths = [
+  "patches/xnu/j716f-verbose-text-console.patch",
+  "package/display/**",
+  "scripts/build-j716f-display-keystore.py",
+]
+inputs = [
+  "2560x1600 32-bit BGRX inherited UEFI GOP framebuffer at 0x9C000000 (Display Reserved 36 MiB).",
+  "Unmodified upstream drivers/GopFramebuffer (NativeLegacyDisplay.cpp, NativeGOPPresenter.cpp) and drivers/AppleKeyStoreState (NativeKeyStoreEvents.cpp).",
+]
+configuration = [
+  "UEFI J716fInheritedFbDxe provides GOP display ownership (2560x1600 BGRX32 at 0x9C000000).",
+  "configs/j716f_stage7_defconfig enables CONFIG_XNU_NATIVE_LEGACY_DISPLAY=y and links build/native-legacy-display/libNativeLegacyDisplay.late.a built by scripts/build-j716f-display-keystore.py.",
+  "Stage 7+ kernel args enable offline-mobile-graphics-load=1, offline-legacy-register=1, offline-legacy-gop=1, offline-legacy-unit-scale=2, offline-legacy-pm=1, offline-legacy-validate=1, offline-legacy-transfer=1, offline-legacy-cpu-present=1, offline-legacy-phase=4, offline-key-events=1, and aks=1.",
+]
+procedure = [
+  "Verify UEFI menu rendering and XNU early framebuffer console output on boot_b.",
+  "Build and verify libNativeLegacyDisplay.late.a against 21H461 kernelcache.decompressed (-0x1000000 slide) via ./unixnu build kernel with j716f_stage7_defconfig.",
+]
+findings = [
+  "UEFI display ownership repair eliminated menu overlay corruption across untouched idle, navigation, QR export, and post-reset return.",
+  "XNU verbose text console patch surfaces early kernel text on the inherited framebuffer.",
+  "Verified 100% byte-for-byte match of all 358 IOMobileFramebufferLegacy vtable slots, 9 abstract leaves, 7 IOSurface getters, vsync_notify, and setDisplayRefreshProperties against 21H461 kernelcache.decompressed (-0x1000000 slide) on Linux.",
+  "Integrated unmodified upstream GopFramebuffer and AppleKeyStoreState (aks=1) with clean J716F board probes (package/display/J716fLegacyDisplayProbe.cpp, J716fKeyStoreProbe.cpp); pending live tablet hardware verification.",
+  "Hardware-verified Stage 7+ boot_b image (06052400...) published NativeLegacyDisplay (2560x1600 BGRX32 GOP, scale 2, vsync=60) and AppleKeyStoreState (aks=1) and rendered the real iPadOS 17.7.11 Apple logo on TB-J716F hardware.",
+  "Hardware-verified Stage 7+ RAM-store boot_b image (2274a64d..., log e1d6a856...) opened 4+ AppleKeyStore user clients and 7+ IOMobileFramebufferUserClient sessions and rendered the real iPadOS 17.7.11 Hello screen on TB-J716F hardware.",
+  "Extended build-j716f-display-keystore.py (13 objects, 245 verified 21H461 bindings) and J716fLegacyDisplayProbe.cpp to launch HID/touch/buttons/CPUfreq probes alongside GopFramebuffer, and verified full SpringBoard desktop with wallpaper and clean kPEGraphicsMode output on hardware.",
+  "Extended build-j716f-display-keystore.py (14 objects) and J716fLegacyDisplayProbe.cpp to compile and invoke j716f_usb_debug_probe() ahead of j716f_touch_probe() so synchronous RPMh TCS 0 votes never race.",
+  "Extended build-j716f-display-keystore.py (16 objects) and J716fLegacyDisplayProbe.cpp to compile and invoke late-staged J716fBattery (IOPMPowerSource) and opt-in Adreno 650 Phase 1 probe (J716fGpuProbe).",
+  "Extended build-j716f-display-keystore.py (21 objects) to compile J716fA650Gmu.c and unmodified upstream kits/AdrenoFirmware (AdrenoFirmware, AdrenoHfi, AdrenoHfiStartup, AdrenoHfiVotes) with -Werror into libNativeLegacyDisplay.late.a.",
+  "Extended build-j716f-display-keystore.py (28 objects) to compile J716fA650GmuContext.c, unmodified upstream kits/ArmSmmu4K (ArmSmmu4K, Context, Program, Streams, Mmio), and an optional local J716F_GPU_FIRMWARE_DIR GMU firmware stub/blob generator with -Werror into libNativeLegacyDisplay.late.a.",
+  "Extended build-j716f-display-keystore.py (31 objects) to compile J716fA650Cp.c, unmodified upstream kits/AdrenoPM4/AdrenoPM4.c, and optional local a650_sqe.fw embedding (J716F_SQE_FIRMWARE / J716F_GPU_FIRMWARE_DIR, 0-byte public stub by default) with -Werror into libNativeLegacyDisplay.late.a.",
+  "Extended build-j716f-display-keystore.py (53 objects, 248 verified 21H461 bindings) with dynamic 21H461 IOAcceleratorES ABI auditing (C2/D2/getMetaClass SHA-256 + vtable check), late-staged NativeAdrenoAccelerator (AGXAccelerator, zero __mod_init_func), 13 unmodified upstream drivers/Adreno740 KMD objects, all ArmSmmu4K objects, A650 ZAP/IRQ/Ring/GpuContext adapters, and optional local a650_zap.mbn embedding.",
+  "Wired opt-in fb-gpu=1 NativeGOPPresenter handoff in J716fLegacyDisplayProbe.cpp (attaching to IOService::getResourceService() with native_gop_presenter_set_source(handoff, nub) and forwarding native_legacy_gpu_offer -> native_gop_gpu_offer, default OFF keeping CPU GOP scanout unchanged) and extracted TB-J716F stock DTS panel inventory: EDO RM692E6 AMOLED WQXGA command-mode dual-DSI panel (0x500 x 2 = 2560x1600 @ 90 Hz, dcs-cmd-by-left backlight).",
+]
+completion = [
+  "Native XNU framebuffer/display driver (GopFramebuffer / IOMobileFramebufferLegacy) and AppleKeyStoreState (aks=1) render iPadOS WindowServer/SpringBoard cleanly on hardware.",
+]
+limits = [
+  "Uses CPU scanout into the inherited 2560x1600 UEFI GOP framebuffer (no Adreno 650 GPU copy client or dynamic DPU mode-setting/backlight control yet).",
+]
+next_action = [
+  "Integrate panel backlight control (DSI DCS brightness) and Adreno 650 GPU/DPU scanout (fb-gpu/dpu-scanout).",
+]
+[[area.evidence]]
+kind = "source"
+reference = "patches/xnu/j716f-verbose-text-console.patch"
+result = "Board XNU verbose framebuffer text console patch"
+[[area.evidence]]
+kind = "source"
+reference = "scripts/build-j716f-display-keystore.py"
+result = "Cross-platform 21H461 kernelcache ABI auditor and GopFramebuffer + AppleKeyStoreState late-init archive builder"
+[[area.evidence]]
+kind = "source"
+reference = "package/display/J716fLegacyDisplayProbe.cpp"
+result = "J716F board probe publishing UEFI GOP framebuffer as IOMobileFramebufferLegacy (phase 4 CPU scanout)"
+[[area.evidence]]
+kind = "source"
+reference = "package/display/J716fKeyStoreProbe.cpp"
+result = "J716F board probe publishing AppleKeyStoreState (aks=1, software key wrapping keyed from /chosen/unique-chip-id)"
+[[area.evidence]]
+kind = "device"
+reference = "package/display/J716fLegacyDisplayProbe.cpp"
+revision = "d57aa9209ac1263f81ffde0d1622e0c614daa459"
+command = "boot_b (sha256 e04afbfd / 248c6020) with GopFramebuffer phase 4 CPU scanout and aks=1"
+result = "Hardware-verified 2560x1600 BGRX32 NativeLegacyDisplay and AppleKeyStoreState rendering iPadOS 17.7.11 SpringBoard desktop with wallpaper"
+
+[[area]]
+id = "input"
+status = "device-verified"
+components = []
+paths = ["package/input/**", "socs/sm8250/README.md"]
+inputs = [
+  "PM8150 SPMI power/volume keys (verified in UEFI J716fKeysDxe); Goodix GT7386 touch controller over SM8250 GENI I2C (QUPv3 Wrap1 SE5 @ 0x00a94000, GPIO 36..39, I2C 0x5d).",
+  "Unmodified upstream ShengHidInput (NativeHidInput.cpp) compiled against 21H461 IOHIDDevice ABI.",
+]
+configuration = [
+  "scripts/build-j716f-display-keystore.py audits 21H461 IOHIDDevice (207 vtable slots, pure slot 180) and links NativeHidInput.late.o, J716fHidInputProbe.o, J716fTouchState.o, J716fTouchProbe.o, J716fButtons.o, and J716fQcomRpmh.o into libNativeLegacyDisplay.late.a.",
+  "board.toml publishes [adt.buttons] (hold, voldown, volup, home-button-type=2).",
+  "Activated by boot-args offline-hid-input=1 offline-hid-home=1 touch-hid=1 j716f-touch=1 j716f-buttons=1.",
+]
+procedure = [
+  "Verify 21H461 IOHIDDevice ABI audit and zero __mod_init_func during ./unixnu build kernel with j716f_stage7_defconfig.",
+  "Verify Goodix GT7386 touch frames and PM8150 PON/GPIO6 button reports on TB-J716F boot_b.",
+]
+findings = [
+  "UEFI J716fKeysDxe volume navigation and power-key selection work reliably on hardware.",
+  "Verified 100% byte-for-byte match of 21H461 IOHIDDevice vtable (207 slots, pure slot 180, C2/handleStart/handleReport) against kernelcache.decompressed (-0x1000000 slide).",
+  "Integrated unmodified NativeHidInput.cpp alongside J716F Goodix GT7386 I2C touch driver (with strict SMMU slot 2/3/4 guard protecting UFS and Display) and PM8150 SPMI button driver.",
+  "Hardware-verified Goodix GT7386 touch (frame 3 pt0=(2531,1263), HID report event=6 status=0x0, accurate coordinates and orientation) and PM8150 SPMI buttons (VolUp 0x4, VolDown 0x8, Power 0x2, sink=1 errs=0, display lock/wake powerstate0<->powerstate1) on TB-J716F SpringBoard desktop.",
+]
+completion = [
+  "Touchscreen and hardware keys deliver HID events to iPadOS userland.",
+]
+limits = [
+  "Touch and buttons use low-overhead kernel polling threads rather than hardware GPIO/SPMI interrupts.",
+]
+next_action = [
+  "Optimize touch/button polling cadence or transition to interrupt-driven wake when idle power saving is added.",
+]
+[[area.evidence]]
+kind = "source"
+reference = "package/input/J716fTouchProbe.cpp"
+result = "Goodix GT7386 GENI I2C touch driver for SM8250 QUPv3 Wrap1 SE5"
+[[area.evidence]]
+kind = "source"
+reference = "package/input/J716fButtons.c"
+result = "PM8150 SPMI hardware button observer (Power, VolDown, VolUp + VolUp+VolDown swipe-up backup)"
+[[area.evidence]]
+kind = "source"
+reference = "package/input/J716fHidInputProbe.cpp"
+result = "Board glue publishing unmodified NativeHidInput (IOHIDDevice) with Built-In Digitizer properties"
+[[area.evidence]]
+kind = "device"
+reference = "package/input/J716fTouchProbe.cpp"
+revision = "d57aa9209ac1263f81ffde0d1622e0c614daa459"
+command = "boot_b with offline-hid-input=1 offline-hid-home=1 touch-hid=1 j716f-touch=1 j716f-buttons=1"
+result = "Hardware-verified Goodix GT7386 I2C touch (status=0x0) and PM8150 SPMI Power/VolUp/VolDown keys (errs=0, lock/wake) on TB-J716F SpringBoard desktop"
+
+[[area]]
+id = "gpu"
+status = "implemented"
+components = ["AdrenoFirmware", "AdrenoPM4", "ArmSmmu4K"]
+paths = ["socs/sm8250/configs/sm8250.config", "package/gpu/**", ".github/workflows/j716f-gpu-addon.yml"]
+inputs = [
+  "Qualcomm Adreno 650 v2.0 (SM8250-AC, chipid 0x06050002, kgsl-3d0@3d00000, gmu@3d6a000, gpucc@3d90000, kgsl-smmu@3da0000, rscc@3de0000, SPI 300, pil_gpu@8681a000, cmd-db@80860000).",
+]
+configuration = [
+  "Staged GPU bring-up probe (package/gpu/J716fGpuProbe.cpp, J716fGpuPowerBoard.h, J716fA650Gmu.c, J716fA650GmuContext.c, J716fA650Cp.c) is compiled into libNativeLegacyDisplay.late.a and remains strictly opt-in via boot-arg j716f-gpu=<1..9> (default 0).",
+  "Optional local GMU and SQE firmware (a650_gmu.bin, a650_sqe.fw) can be linked via J716F_GPU_FIRMWARE_DIR or J716F_GMU_FIRMWARE / J716F_SQE_FIRMWARE; public/CI builds link 0-byte stubs so modes 7-9 report missing firmware cleanly without failing builds.",
+]
+procedure = [
+  "Run C ASan/UBSan host unit tests J716fGpuPowerBoardTest (modes 0..6), J716fA650GmuTest (GMU cold-start/HFI/GX), J716fA650GmuContextTest (KGSL SMMU Bank 1 GMU context), and J716fA650CpTest (KGSL SMMU Bank 0 GPU context + A650 hw_init + AdrenoPM4 Ring 0).",
+  "Inspect live hardware probe output via USB Debug command 'gpu' with j716f-gpu=1..9 before advancing to Phase 3b zap shader TZ authentication, GPU SPI 300 IRQ, and AdrenoMetal/Turnip.",
+]
+findings = [
+  "Software/framebuffer console is sufficient for kernel and storage bring-up.",
+  "Verified exact TB-J716F stock DTB Adreno 650 register geometry (chipid 0x06050002, UBWC 4, HBB 16, SPI 300, kgsl-3d0@3d00000, gmu@3d6a000, pdc@b290000/b490000, gpucc@3d90000, kgsl-smmu@3da0000, rscc@3de0000, pil_gpu@8681a000).",
+  "Implemented and host-verified Phase 1 staged GPU probe (package/gpu/J716fGpuPowerBoard.h + J716fGpuProbe.cpp + ASan/UBSan J716fGpuPowerBoardTest.c) with strict per-mode write whitelist and USB Debug 'gpu' command reporting.",
+  "Verified TB-J716F stock DTB gpu-opp-table_v2 (7 GPU OPPs 305..670 MHz / RPMh levels 64..320) and implemented Phase 2 GMU cold-start + HFI startup + GX power engine (package/gpu/J716fA650Gmu.c/h) linked against unmodified upstream kits/AdrenoFirmware, verified under ASan/UBSan by J716fA650GmuTest.c.",
+  "Audited TB-J716F stock DTB kgsl-smmu@3da0000 (qsmmu-v500, no dma-coherent, gfx_0_tbu 0x0..0x3ff + gfx_1_tbu 0x400..0x7ff, gmu_kernel iommus <0x181 0x05 0x400>) and implemented Phase 2b KGSL SMMU 4 KiB GMU context (J716fA650GmuContext.c/h on unmodified kits/ArmSmmu4K, bank 1 / ASID 1 / slots 2,3 -> SIDs 0x0005,0x0405, non-coherent table walks + dc cvac) plus Modes 7-8 in J716fGpuProbe.cpp; verified under ASan/UBSan by J716fA650GmuContextTest.c.",
+  "Hardware-verified j716f-gpu=1 and j716f-gpu=8 on TB-J716F over live USB Debug COM9: CX GDSC powered on (0x00222001->0xf8222000), KGSL SMMU probed (cr0=0x00230406, id0=0x4c017e06 6 SMRs/EXIDS=0, id1=0x20000005 5 banks, id2=0x00005511 36-bit OAS, gfsr=0), AOP cmd-db ARC/BCM levels verified (gfx.lvl 0/48/64/128/144/192/224/256/320/384/416, SH0/MC0/ACV/CN0), GMU 200 MHz clocks up (step=5 fail=0, sysrst=1), and ArmSmmu4K Bank 1 programmed and enabled (tbl=13, ttbr0=0x1000129203000, readback valid); unused faulting S2CRs read 0x00f2c2ff on QSMMUv500 so added safe unused-FAULT S2CR normalization to canonical 0x00020000 in J716fA650GmuContext.c before unmodified ArmSmmu4KAttachStreams.",
+  "Hardware-verified full Phase 2b Mode 7-8 end-to-end on TB-J716F (a650_gmu.bin 41548 B, live USB Debug COM9): GMUCTX st=0 step=6 (ArmSmmu4K Bank 1 / ASID 1 / 2 verified routes smr=0x80000005/0x80000405 s2cr=0x00000001, 13 table pages, 36-bit OAS), GMU cold-start LOAD st=0 ph=8 (16 blocks, FW ver=0x20010008, init=0x100, hfi=0x1, rdy=11, ao=0), HFI st=0 stg=8 ack=0xc6 err=0 sent=4 (<1 ms), and GX power-on at OPP 7 (670 MHz): GX on vote=0 oob=2 gx=0x000000c0->0x00000000 gdscr=0xf8222800 rbbm=0x00000001 gbif=0/3 rh=0/0 with zero faults while booting iPadOS 17.7.11 desktop.",
+  "Implemented and host-verified Phase 3 Mode 9 (package/gpu/J716fA650Cp.c/h + J716fA650CpTest.c): KGSL SMMU Bank 0 / ASID 2 GPU context (4 routes on remaining SMR slots 0,1,4,5 -> SIDs 0x0000,0x0001,0x0400,0x0401, CB0 ACTLR CPRE clear + TLBIALL), A650 hw_init (49-entry HWCG, UBWC HBB=16, UCHE, 39-entry CP_PROTECT, APRIV), SQE microcode load, Ring 0 + CP_ME_INIT + CP_MEM_WRITE (0xA6500C0D) on unmodified upstream kits/ArmSmmu4K and kits/AdrenoPM4.",
+  "Hardware-verified full Phase 3 Mode 9 end-to-end on TB-J716F first try (boot_b SHA-256 48708981..., a650_gmu.bin 41548 B + a650_sqe.fw 31964 B, live USB Debug COM9): GPUCTX st=0 step=7 (ArmSmmu4K Bank 0 / ASID 2 / 4 routes smr=0x80000000 s2cr=0x00000000, tbl=3, ttbr0=0x2000129344000, CB0 ACTLR 3->1), CP st=0 step=6 (sqe=31960/0, hwcg=0->0x8aa8aa82, CP_ME_INIT fence f1=1(2), CP_MEM_WRITE fence f2=2(2) DMA marker mk=0xa6500c0d verified in DRAM), CPSTATE rbbm=0x00000001 (idle), rptr=0x1b == wptr=0x1b, hwf=0, cpi=0, int0=0x00000001, cb0_fsr=0x00000400 (AArch64 FORMAT bit only, zero faults under ArmSmmu4K FSR_FAULT mask 0xc00001fe) while booting iPadOS 17.7.11 desktop.",
+  "Implemented and host/ARM64-build-verified Phase 3b + Phase 4a (Modes 10-11): J716fA650Zap.c/h + ASan/UBSan J716fA650ZapTest.c (ELF32 MDT parser, SM8250 SIP SMC64 PAS 13 auth into pil_gpu_region@8681a000 with CPU unmap before TZ auth, CP_SET_SECURE_MODE 0, CP SMMU aperture SCM), J716fA650Irq.cpp (exact Linux A6XX_INT_MASK 0x03D0E242 including bit 20 CP_CACHE_FLUSH_TS + SPI 300 INTID 332 handler), J716fA650Ring.cpp (A650 PM4 ring implementing upstream NativeAdrenoRing.h: CACHE_FLUSH_TS, CP_SMMU_TABLE_UPDATE, CCU inv, UCHE inv, IFPC markers), J716fA650GpuContext.cpp (4-SMR QSMMUv500 Bank 0 + ACTLR CPRE clear + unused-FAULT S2CR normalization implementing NativeAdrenoGpuContext.h), linked with 13 unmodified upstream drivers/Adreno740 KMD objects and 21H461-audited late-init AGXAccelerator (IOAcceleratorES).",
+  "Hardware-verified full Phase 3b + Phase 4a Mode 11 end-to-end on TB-J716F (boot_b SHA-256 0ef683e1..., a650_gmu.bin 41548 B + a650_sqe.fw 31964 B + Lenovo OEM-signed a650_zap.mbn 13964 B, live USB Debug COM9): GPUCTX st=0 step=7 (p=0/1/1 r=0/4 ias=48 oas=36 actlr=3>1 spans=11), CP st=0 (sqe=31960/0 f1=1(1) f2=2(1) mk=a6500c0d hwcg=0>8aa8aa82), ZAP rc=0 stg=7 (Lenovo OEM-signed zap authenticated by retail TrustZone PAS 13 in 12 ms: init=0(11ms/1r) mem=0 auth=0(1ms) sec=0 trust=1>0), IRQ att=0 gicd=a002 n=1>2+ seen=00100000 now=00000000 mc=1023/1023 ap=1/0 unh=0, KMD pub=0 tm=2 cpchk=0/0/0/0/0 ap2=0 tmr=0 (hardware CP_SMMU_TABLE_UPDATE per-process TTBR0 switching verified), and UCWRAP r1=4/4 r2=4/4 ok=32/32 err=0@-1 ts=1653305>1656442 o=2/2 fsr=00000400 (2 full NativeAdrenoABI v2 IOUserClient/BO/IB1/WaitFence/VM-recycle rounds with zero SMMU faults).",
+  "Added .github/workflows/j716f-gpu-addon.yml (macOS runner) to build Phase 4b userspace gpuaddon.bin (NativeAdrenoMetal.bundle + libvulkan_freedreno.dylib Mesa Turnip + metal2vulkan bridge for arm64-apple-ios17.0) and trust.json CDHashes from pinned upstream UniXNU sources.",
+  "Updated J716fGpuProbe.cpp with exact iPadOS 17 NativeSandboxGrantProcess allow-list, early AGXAccelerator registration when j716f-gpu-metal=1, and live GPU[ADDON]/GPU[METAL]/GPU[MPLUG]/GPU[MTBL] USB Debug telemetry; guarded iPadOS 27 (24A446) ptrauth_strip block in j716f-gpu-addon.yml for arm64-apple-ios17.0.",
+  "Fixed metal2vulkan-runtime aarch64-apple-ios build in j716f-gpu-addon.yml (generated patch 0065 adding iOS read_pages via vm_read_overwrite in copied.rs and enabling mach_vm_region mapped_writable/reachable_now/mapped_with on iOS in host_memory.rs, plus Cargo registry cache).",
+  "Confirmed libadreno_metal_bridge.a (metal2vulkan + runtime) builds cleanly for aarch64-apple-ios on GitHub Actions macOS runner; added missing drivers/GopFramebuffer submodule (NativeGOPWire.h/NativeHalfCodes.h) and thin LTO + bridge caching in j716f-gpu-addon.yml.",
+  "Confirmed NativeAdrenoMetal executable (arm64-apple-ios17.0 Objective-C++ + 378 MB libadreno_metal_bridge.a) links cleanly on macos-15; handled classic LC_DYLD_INFO_ONLY libvulkan_freedreno.dylib in macho-self-bind-weak-imports.py for final codesign and NGPUADD2 packing.",
+  "Synced j716f-gpu-addon.yml to upstream UniXNU b04f131da915 (Adreno740 2962e289 null-AS map fix, AdrenoMetal 0b7094bf + UniXNU/metal2vulkan 87a869f7 fork, Turnip runtime capabilities & timeline wait patches), retiring the custom 0065 iOS runtime patch in favor of upstream NativeMetalHostMapping.rs.",
+  "Fixed arm64-apple-ios17.0 compilation and linking in j716f-gpu-addon.yml (pinned to UniXNU e7bddb9a7eec): guarded MTLBarrierScopeRenderTargets (API_UNAVAILABLE(ios)) in NativeBridgeMetalFrontend.mm and switched NativeMetalHostMapping.rs mach_vm_remap/mach_vm_deallocate/mach_vm_read_overwrite to runtime libc::dlsym(RTLD_DEFAULT) with vm_* fallback for public iphoneos SDK.",
+  "Live TB-J716F hardware trials with new Phase 4b addon (run 45741988015) verified hardware IO coherence (H d64/64 a1 r1024/0 w1024/1024 -> on, coh=1, owned=1 with gpu-owned-coherent=1), 896 MiB WC GPU VRAM pool registration, 6/6 addon extraction, and NativeAdrenoMetal.bundle + Turnip + metal2vulkan loading in backboardd/mediaserverd/PhotosPosterProv; diagnosed metal2vulkan-runtime floor rejection to VkPhysicalDeviceVulkan12Features.storageBuffer8BitAccess (false on A650 a6xx_gen3 in Mesa freedreno_devices.py) and moved storage_buffer8_bit_access to OPTIONAL in j716f-gpu-addon.yml so metal2vulkan lowers 8-bit accesses cleanly via memory/leaf.rs.",
+]
+completion = [
+  "Adreno 650 GMU cold-start, ArmSmmu4K GPU/GMU contexts, CP/zap shader bring-up, full A650 KMD (Phase 3b + 4a), and AdrenoMetal/Turnip 3D acceleration (Phase 4b).",
+]
+limits = [
+  "Phase 3b (Lenovo OEM-signed a650_zap.mbn TZ PAS 13 auth, trust 1->0, CP_MEMCPY 1023/1023, GPU SPI 300 IRQ, CP SMMU aperture) and Phase 4a (full A650 KMD, CP_SMMU_TABLE_UPDATE per-process TTBR0 switching, 32/32 NativeAdrenoABI v2 IOUserClient rounds) are hardware-verified on TB-J716F; Phase 4b userspace gpuaddon.bin (NativeAdrenoMetal.bundle + Mesa Turnip for arm64-apple-ios17.0) and j716f-gpu-metal=1 AGXAccelerator activation remain next.",
+]
+next_action = [
+  "Build Phase 4b userspace gpuaddon.bin (NativeAdrenoMetal.bundle + libvulkan_freedreno.dylib Mesa Turnip for A650 0x06050002 / iPadOS 17.7.11) on GitHub Actions macOS runner, wire GPU addon mount + sandbox grant, and enable j716f-gpu-metal=1.",
+]
+[[area.evidence]]
+kind = "source"
+reference = "socs/sm8250/configs/sm8250.config"
+result = "SM8250 base config keeping full native GPU acceleration disabled during Phase 1 bring-up"
+[[area.evidence]]
+kind = "source"
+reference = "package/gpu/J716fGpuPowerBoard.h"
+result = "TB-J716F Adreno 650 v2.0 Phase 1 prerequisite-gated power/clock/SMMU/GMU/cmd-db state machine"
+[[area.evidence]]
+kind = "source"
+reference = "package/gpu/tests/J716fGpuPowerBoardTest.c"
+result = "Host ASan/UBSan unit test verifying modes 0..6 safety invariants and AOP cmd-db parsing"
+[[area.evidence]]
+kind = "source"
+reference = "package/gpu/J716fA650Cp.c"
+result = "Hardware-verified Phase 3 Mode 9 KGSL SMMU Bank 0 GPU context, A650 hw_init, SQE microcode load, and Ring 0 CP_ME_INIT / CP_MEM_WRITE"
+
+[[area]]
+id = "network"
+status = "planned"
+components = []
+paths = ["socs/sm8250/kits/Sm8250Platform/Sm8250GeniUart.h", "socs/sm8250/kits/Sm8250Platform/Sm8250GeniUart.c"]
+inputs = [
+  "TB-J716F Wi-Fi/BT (WCN685x / QCA6390) and USB-C gadget networking.",
+]
+configuration = [
+  "No Wi-Fi, Bluetooth, or USB networking driver is enabled in the current bring-up config.",
+]
+procedure = [
+  "Plan USB gadget or Wi-Fi bring-up after Stage 7 userland shell access is established.",
+]
+findings = [
+  "Early BSD software loopback and network control initialization passed in r28-r30 checkpoints.",
+  "Extracted TB-J716F stock DTS wireless topology: Qualcomm QCA6390 Wi-Fi (cnss-qca6390 on PCIe RC 0 qcom,pcie@1c00000, wlan-rc-num = 0, wlan-en-gpio = tlmm 20) and QCA6390 Bluetooth (/vendor/bt_qca6390, bt_en_sleep).",
+]
+completion = [
+  "Working network connectivity (USB Ethernet or Wi-Fi) under iPadOS.",
+]
+limits = [
+  "No physical network interface driver is active.",
+]
+next_action = [
+  "Bring up USB peripheral or Wi-Fi networking after Stage 7.",
+]
+[[area.evidence]]
+kind = "source"
+reference = "socs/sm8250/kits/Sm8250Platform/Sm8250GeniUart.h"
+result = "SM8250 GENI serial header retained for SoC platform support"
+
+[[area]]
+id = "audio"
+status = "planned"
+components = []
+paths = ["configs/j716f_defconfig"]
+inputs = [
+  "TB-J716F quad-speaker / WCD/WSA audio subsystem.",
+]
+configuration = [
+  "Audio drivers are disabled during kernel and storage bring-up.",
+]
+procedure = [
+  "Defer audio bring-up until Stage 7 userland is stable.",
+]
+findings = [
+  "Not yet investigated.",
+  "Default configs/j716f_defconfig was promoted to Stage 7+ desktop while audio subsystems remain disabled until ADSP/Audio HAL bring-up.",
+]
+completion = [
+  "Audio playback works in iPadOS userland.",
+]
+limits = [
+  "No audio driver is implemented.",
+]
+next_action = [
+  "Investigate SM8250 audio topology after Stage 7.",
+]
+[[area.evidence]]
+kind = "source"
+reference = "configs/j716f_defconfig"
+result = "Default Stage 7+ desktop defconfig keeping audio subsystems disabled"
+
+[[area]]
+id = "power"
+status = "device-verified"
+components = []
+paths = ["patches/xnu/j716f-power-probe-call.patch", "package/power/**"]
+inputs = [
+  "PSCI SMC reset/shutdown, SM8250 GCC/UFS GDSC power rails, PM8150 PMIC, SM8250-AC EPSS CPUfreq (0x18591000/2000/3000) and L3 (0x18590000).",
+]
+configuration = [
+  "PSCI method is set to smc in board.toml [payload.adt]; CONFIG_XNU_SHENG_PMGR is disabled.",
+  "package/power/J716fCpuFreq.cpp implements SM8250-AC EPSS 3-domain (4+3+1) CPUfreq and L3 scaling with a 16 ms dynamic governor and touch/button boost (cpufreq=4).",
+]
+procedure = [
+  "Verify UEFI Restart/Power off actions and XNU PSCI reset behavior on hardware.",
+]
+findings = [
+  "UEFI Restart and Power off (with USB/charger disconnected) were verified on hardware.",
+  "XNU SMC PSCI system reset was verified across staged early-boot checkpoints.",
+  "GCC UFS power/clock state observation is wired via J716fStoragePower.",
+  "Added SM8250-AC EPSS 3-domain CPUfreq (0x18591000/2000/3000) and L3 (0x18590000, vote 0x320) scaling driver in package/power/J716fCpuFreq.cpp verified from TB-J716F stock DTB; hardware-verified ~2.26x faster early boot and responsive desktop alongside 8-core SMP.",
+  "Exported j716f_cpufreq_snapshot() from package/power/J716fCpuFreq.cpp to report live EPSS hardware MHz, perf votes, and LUT bounds over the USB debug terminal.",
+  "Added opt-in PM8150B gen4 fuel gauge + SMB5 charger IOPMPowerSource driver (package/power/J716fBattery.cpp + J716fBatteryBoard.h, j716f-battery=1 read-only SPMI observer, late-init staged with zero __mod_init_func) verified against TB-J716F stock DTB (qcom,pm8150b@2) and host ASan/UBSan test J716fBatteryBoardTest.c; wired battery telemetry into USB Debug CLI.",
+  "Hardware-verified PM8150B battery driver (j716f-battery=1) and live EPSS CPUfreq scaling (cpufreq=4) on TB-J716F iPadOS 17.7.11 SpringBoard desktop: IOPMPowerSource published with 0 errors (12%->11%, 3687mV->3634mV, -366mA/-961mA, charging bolt rendered in iPadOS status bar) and EPSS dynamically scaled A55 288..1804 MHz, A77 1286..2419 MHz, Prime 844..3187 MHz, L3 1612 MHz.",
+]
+completion = [
+  "Clean OS reboot/shutdown, battery telemetry, and runtime PMGR/clock control.",
+]
+limits = [
+  "EPSS CPUfreq/L3 scaling and read-only PM8150B battery/charger telemetry are verified on hardware; full PMGR clock/regulator control, charging policy, and sleep/wake power states are not yet enabled.",
+]
+next_action = [
+  "Evaluate ArmCpu platform sleep/GIC resume integration and thermal/PMGR power management.",
+]
+[[area.evidence]]
+kind = "source"
+reference = "patches/xnu/j716f-power-probe-call.patch"
+result = "Board XNU storage power observation hook"
+[[area.evidence]]
+kind = "device"
+reference = "package/power/J716fBattery.cpp"
+revision = "d57aa9209ac1263f81ffde0d1622e0c614daa459"
+command = "boot_b with cpufreq=4 j716f-battery=1 inspected over live USB Debug CDC-ACM"
+result = "Hardware-verified SM8250-AC EPSS 3-domain CPUfreq + L3 scaling and PM8150B IOPMPowerSource battery/charging telemetry on iPadOS 17.7.11 desktop"
+
+[[area]]
+id = "packaging"
+status = "host-verified"
+components = ["XnuPrelink"]
+paths = ["scripts/package.sh", "scripts/pack-j716f-gpu-addon.py", "scripts/ci/**", "README-data-runner.md"]
+inputs = [
+  "Android boot image v2 (pagesize 4096, max_image_bytes 96 MiB / 100663296), 80-88 MiB FAT payload, macOS-generated iPadOS 17.7.11 Data seed, and Phase 4b NGPUADD2 gpuaddon.bin.",
+]
+configuration = [
+  "scripts/package.sh delegates directly to official ./unixnu release -D <device>.",
+  "scripts/pack-j716f-gpu-addon.py validates NGPUADD2 gpuaddon.bin, builds DarwinBoot-compatible 3-module owner-trust.bundle from stock 21H461 trust cache + trust.json CDHashes, computes bounded payload size_mib (80..88 MiB), and invokes official ./unixnu build payload + ./unixnu bootimg with optional --fb-gpu and --data-persist flags.",
+  "scripts/ci/ and .github/workflows/data-seed.yml build and verify fresh macOS APFS Data seeds (data-21H461.dbr) without private device identities.",
+]
+procedure = [
+  "Run ./unixnu build payload --os 17 and ./unixnu bootimg --os 17 --uefi ../uefi-j716f --dtb <normalized-dtb>.",
+  "Run scripts/ci unit tests via unittest in CI.",
+]
+findings = [
+  "Eliminated external post-payload mcopy mutations; payload.img and boot.img are assembled end-to-end by official ./unixnu.",
+  "End-to-end clean VM build produced verified 85,725,184-byte boot.img, 7,340,032-byte SILICIUM_UEFI.fd, and 51,249,152-byte kernel.macho.",
+  "Added scripts/ci/test_usb_debug_wire.py validating GSC1 frame reassembly, CRC-32 error rejection, and pure-stdlib RGB565->PNG encoding (29/29 host Python tests passing).",
+  "Promoted Phase 4b GPU addon boot.img packer into scripts/pack-j716f-gpu-addon.py with full DarwinBoot trust-cache structural validation and host unit tests in scripts/ci/test_pack_gpu_addon.py.",
+  "Promoted Stage 7+ desktop defconfig, verified desktop kernel_args, and [payload.install] into default board.toml for scripts/package.sh; updated scripts/pack-j716f-gpu-addon.py to auto-detect both j716f and j716f_stage7 output trees and added scripts/package.sh --no-deps --check verification in j716f-ci.yml.",
+  "Added optional --boot-menu-theme override (default/oc-like) to scripts/pack-j716f-gpu-addon.py with unit test coverage in scripts/ci/test_pack_gpu_addon.py (37/37 Python tests passing) and verified 85,729,280-byte oc-like boot.img assembly on Linux VM.",
+]
+completion = [
+  "Reproducible single-command ./unixnu release packaging with verified boot.img and Data seed.",
+]
+limits = [
+  "Normalized stock DTB and unique chip ID remain user-provided local inputs per proprietary-files.txt.",
+]
+next_action = [
+  "Verify end-to-end Phase 4b GPU addon boot.img assembly via scripts/pack-j716f-gpu-addon.py and refresh upstream UniXNU devices.toml record after adding the unixnu GitHub topic.",
+]
+[[area.evidence]]
+kind = "source"
+reference = "scripts/package.sh"
+result = "Standard UniXNU Format 2 device packaging entry script"
+[[area.evidence]]
+kind = "source"
+reference = "scripts/pack-j716f-gpu-addon.py"
+result = "Reproducible Phase 4b NGPUADD2 + owner-trust.bundle Stage 7+ boot.img packer"
+[[area.evidence]]
+kind = "source"
+reference = "scripts/ci/test_pack_gpu_addon.py"
+result = "Host Python unit tests verifying owner-trust.bundle sorting/validation, NGPUADD2 parsing, payload size_mib bounds, and Stage 7+ output-dir resolution"
+[[area.evidence]]
+kind = "source"
+reference = "scripts/ci/test_data_seed_tools.py"
+result = "Unit tests for macOS Data seed format and manifest verification"
+[[area.evidence]]
+kind = "host"
+reference = "scripts/package.sh"
+revision = "d57aa9209ac1263f81ffde0d1622e0c614daa459"
+command = "PYTHONPATH=scripts/ci python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v && scripts/package.sh --no-deps --check --os 17"
+result = "36/36 Python packaging/seed/wire unit tests and official Format 2 release preflight/patch check passed"
+
+[[area]]
+id = "diagnostics"
+status = "device-verified"
+components = []
+paths = [
+  "patches/xnu/j716f-earlylog-console.patch",
+  "patches/xnu/j716f-apfs-root-probe.patch",
+  "patches/xnu/j716f-storage-dependency.patch",
+  "patches/xnu/j716f-storage-init.patch",
+  "patches/xnu/j716f-skip-setup.patch",
+  "patches/xnu/ipados17-series",
+  "patches/xnu/series",
+  "package/usb/**",
+  "scripts/j716f-usb-debug.py",
+]
+inputs = [
+  "Retained RAM early-log ring buffer (JXLG), UEFI Advanced Logger QR exporter, and XNU console boot-args (-v serial=3 j716f-earlylog=1).",
+]
+configuration = [
+  "patches/xnu/series applies earlylog console, verbose text console, storage init/dependency, power probe, and APFS root probe patches.",
+]
+procedure = [
+  "Trigger reset and enter UEFI Tools -> Advanced Logger to export retained XNU logs via QR.",
+]
+findings = [
+  "Retained early XNU logs survived both PSCI reset and long-power-button reset in hardware trials, enabling exact instruction-level diagnosis without hardware UART.",
+  "Added patches/xnu/j716f-skip-setup.patch (gated by j716f-skip-setup=1) to seed the 5 official skip-setup binary plists into /private/var without macOS hdiutil; retained JXLG logs verified desktop, touch, buttons, and 8-core SMP boots on hardware.",
+  "Upgraded j716f-earlylog-console.patch with a bounded atomic spinlock for all-8-CPU capture plus a 256 KiB live RAM log ring (PE_j716f_klog_read), added opt-in bare-metal SM8250 DWC3 USB CDC-ACM driver under package/usb/ (j716f-usb=1, strict SMMU slot 2/3/4 guard, adaptive idle polling, zero HUD overlay), and added host CLI scripts/j716f-usb-debug.py with GSC1 PNG capture and C/Python wire unit tests.",
+  "Added 'gpu' interactive command to J716fUsbDebugCdc.cpp and scripts/j716f-usb-debug.py probe to dump Adreno 650 Phase 1 power/clock/KGSL-SMMU/GMU/cmd-db diagnostics live over USB CDC-ACM.",
+  "Expanded J716fUsbDebugCdc.cpp 'gpu' snapshot buffer to 3072 B (static) so all 18 Phase 2b Mode 7-8 KGSL SMMU/GMU/HFI/GX diagnostic rows transmit without truncation or kernel stack pressure.",
+  "Hardware-verified bare-metal SM8250 DWC3 USB Debug CDC-ACM (j716f-usb=1, COM9 sn=J716FDBG01, High-Speed mps=512, smmu_bank=73) on Windows usbser.sys with live 256 KiB kernel log ring, interactive probe/gpu/battery/cpufreq commands, and GSC1 960x600 live PNG desktop screenshots.",
+  "Expanded J716fUsbDebugCdc.cpp 'gpu' snapshot buffer to 4096 B (static) to fit all 21 Phase 3 Mode 9 diagnostic rows (GPUCTX, CP, CPSTATE).",
+  "Expanded J716fUsbDebugCdc.cpp 'gpu' snapshot buffer to 6144 B (static) to fit all 26 Phase 3b + 4a Mode 10-11 diagnostic rows (ZAP, IRQ, KMD, UCWRAP, METAL).",
+  "Added full SM8250/PM8150 reboot-mode control to USB Debug (J716fUsbDebugCdc.h/cpp and scripts/j716f-usb-debug.py: reboot [normal|bootloader|recovery|off], poweroff, and read-only reboot.probe writing PM8150 PON_SOFT_RB_SPARE 0x8F via SPMI EE0 + IMEM 0x146BF65C + PSCI_SYSTEM_RESET/OFF); hardware-verified hands-free 'reboot bootloader' from live iPadOS into fastboot (HA1Q9SKY, pon apid=13 own=0 rc=0) -> fastbootd -> boot_b flash.",
+  "Extended J716fUsbDebugCdc.cpp 'status' and 'display' commands to report fb-gpu handoff readiness/fallback counters (NativeGOPPresenter) and persistent Data store state/GPT status.",
+]
+completion = [
+  "Reliable kernel log capture through root mount and early userland bring-up.",
+]
+limits = [
+  "Bounded early-log RAM ring may wrap under verbose output; hardware UART is not required but remains unavailable externally.",
+]
+next_action = [
+  "Capture Phase 4b GPU Metal addon runtime telemetry over USB Debug CDC-ACM during j716f-gpu-metal=1 hardware bring-up.",
+]
+[[area.evidence]]
+kind = "source"
+reference = "patches/xnu/j716f-earlylog-console.patch"
+result = "Board XNU retained RAM early-log console patch"
+[[area.evidence]]
+kind = "source"
+reference = "patches/xnu/series"
+result = "Consolidated board XNU patch series"
+[[area.evidence]]
+kind = "device"
+reference = "package/usb/J716fUsbDebugCdc.cpp"
+revision = "d57aa9209ac1263f81ffde0d1622e0c614daa459"
+command = "python3 scripts/j716f-usb-debug.py --port COM9 probe && reboot bootloader"
+result = "Hardware-verified SMP-safe JXLG RAM ring, bare-metal DWC3 USB CDC-ACM terminal, live GSC1 PNG screenshots, and hands-free reboot bootloader on TB-J716F"
+
+[[area]]
+id = "sensors"
+status = "planned"
+components = []
+paths = ["dts/j716f.dts"]
+inputs = [
+  "TB-J716F accelerometer/gyroscope/ambient light sensors (SLPI/SSC).",
+]
+configuration = [
+  "Sensor subsystems are not enabled in the current bring-up configuration.",
+]
+procedure = [
+  "Defer sensor bring-up until core iPadOS userland, display, and input work.",
+]
+findings = [
+  "Not yet investigated.",
+  "dts/j716f.dts enabled cpu1..cpu7 for 8-core SMP bring-up; SLPI/SSC sensor nodes remain deferred.",
+]
+completion = [
+  "Orientation and ambient light sensors report readings to iPadOS.",
+]
+limits = [
+  "No sensor driver is implemented.",
+]
+next_action = [
+  "Investigate sensor integration after Stage 7.",
+]
+[[area.evidence]]
+kind = "source"
+reference = "dts/j716f.dts"
+result = "Board device tree scoped to Stage 5/6 bring-up peripherals"

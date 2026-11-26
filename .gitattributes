@@ -1,0 +1,9 @@
+# Frozen workspace files are byte-hashed. Do not normalize their line endings.
+/workspace/** -text
+/overlays/** -text
+/pins/** -text
+*.md text eol=lf
+/workspace/**/*.md -text
+*.py text eol=lf
+/workspace/**/*.py -text
+/overlays/**/*.py -text

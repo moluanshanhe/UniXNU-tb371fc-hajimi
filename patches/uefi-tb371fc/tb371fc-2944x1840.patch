@@ -1,0 +1,85 @@
+diff --git a/Platforms/Lenovo/j716fPkg/Drivers/J716fInheritedFbDxe/J716fInheritedFb.c b/Platforms/Lenovo/j716fPkg/Drivers/J716fInheritedFbDxe/J716fInheritedFb.c
+index 3320a80..7cf15ff 100644
+--- a/Platforms/Lenovo/j716fPkg/Drivers/J716fInheritedFbDxe/J716fInheritedFb.c
++++ b/Platforms/Lenovo/j716fPkg/Drivers/J716fInheritedFbDxe/J716fInheritedFb.c
+@@ -89,7 +89,7 @@ EFI_STATUS EFIAPI J716fInheritedFbEntry (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABL
+   mInfo.PixelsPerScanLine = mInfo.HorizontalResolution;
+   mInfo.PixelFormat = PixelBlueGreenRedReserved8BitPerColor;
+   if ((Region.Address != 0x9C000000) ||
+-      (mInfo.HorizontalResolution != 2560) || (mInfo.VerticalResolution != 1600) ||
++      (mInfo.HorizontalResolution != 2944) || (mInfo.VerticalResolution != 1840) ||
+       (FixedPcdGet8 (PcdFrameBufferColorDepth) != 32)) {
+     return EFI_UNSUPPORTED;
+   }
+@@ -114,6 +114,6 @@ EFI_STATUS EFIAPI J716fInheritedFbEntry (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABL
+     mBlt = NULL;
+     return Status;
+   }
+-  DEBUG ((DEBUG_ERROR, "J716F V8 INHERITED_GOP 9C000000 2560x1600 BGRX32; scanout unverified\n"));
++  DEBUG ((DEBUG_ERROR, "TB371FC INHERITED_GOP 9C000000 2944x1840 BGRX32\n"));
+   return EFI_SUCCESS;
+ }
+diff --git a/Platforms/Lenovo/j716fPkg/Library/J716fFrameBufferSerialPortLib/FrameBufferSerialPortLib.c b/Platforms/Lenovo/j716fPkg/Library/J716fFrameBufferSerialPortLib/FrameBufferSerialPortLib.c
+index e14f305..a6449ad 100644
+--- a/Platforms/Lenovo/j716fPkg/Library/J716fFrameBufferSerialPortLib/FrameBufferSerialPortLib.c
++++ b/Platforms/Lenovo/j716fPkg/Library/J716fFrameBufferSerialPortLib/FrameBufferSerialPortLib.c
+@@ -281,10 +281,9 @@ GetFrameBufferMemory (
+     return Status;
+   }
+ 
+-  // Same static, tightly packed geometry as J716fInheritedFbDxe. This bounds
+-  // early writes; actual scanout/stride still needs hardware verification.
+-  if ((FbRegion.Address != 0x9C000000ULL) || (FB_WIDTH != 2560) ||
+-      (FB_HEIGHT != 1600) || (FixedPcdGet8 (PcdFrameBufferColorDepth) != 32)) {
++  // TB371FC dual-DSI framebuffer geometry (2944x1840 BGRX32 at 0x9C000000).
++  if ((FbRegion.Address != 0x9C000000ULL) || (FB_WIDTH != 2944) ||
++      (FB_HEIGHT != 1840) || (FixedPcdGet8 (PcdFrameBufferColorDepth) != 32)) {
+     return EFI_UNSUPPORTED;
+   }
+   ImageBytes = (UINT64)FB_WIDTH * FB_HEIGHT * FB_BPP;
+diff --git a/Platforms/Lenovo/j716fPkg/j716f.dsc b/Platforms/Lenovo/j716fPkg/j716f.dsc
+index fdab568..111a988 100644
+--- a/Platforms/Lenovo/j716fPkg/j716f.dsc
++++ b/Platforms/Lenovo/j716fPkg/j716f.dsc
+@@ -45,16 +45,16 @@
+   # SMBIOS
+   #
+   gSiliciumPkgTokenSpaceGuid.PcdSmbiosSystemManufacturer|"Lenovo"
+-  gSiliciumPkgTokenSpaceGuid.PcdSmbiosSystemModel|"Xiaoxin Pad Pro 2021"
+-  gSiliciumPkgTokenSpaceGuid.PcdSmbiosSystemRetailModel|"j716f"
+-  gSiliciumPkgTokenSpaceGuid.PcdSmbiosSystemRetailSku|"TB-J716F"
+-  gSiliciumPkgTokenSpaceGuid.PcdSmbiosSystemBoardModel|"Xiaoxin Pad Pro 2021"
++  gSiliciumPkgTokenSpaceGuid.PcdSmbiosSystemModel|"Xiaoxin Pad Pro 12.7"
++  gSiliciumPkgTokenSpaceGuid.PcdSmbiosSystemRetailModel|"tb371fc"
++  gSiliciumPkgTokenSpaceGuid.PcdSmbiosSystemRetailSku|"TB371FC"
++  gSiliciumPkgTokenSpaceGuid.PcdSmbiosSystemBoardModel|"Xiaoxin Pad Pro 12.7"
+ 
+   #
+-  # Simple Frame Buffer
++  # Simple Frame Buffer (TB371FC dual-DSI 2944x1840 BGRX32 at 0x9C000000)
+   #
+-  gSiliciumPkgTokenSpaceGuid.PcdFrameBufferWidth|2560
+-  gSiliciumPkgTokenSpaceGuid.PcdFrameBufferHeight|1600
++  gSiliciumPkgTokenSpaceGuid.PcdFrameBufferWidth|2944
++  gSiliciumPkgTokenSpaceGuid.PcdFrameBufferHeight|1840
+   gSiliciumPkgTokenSpaceGuid.PcdFrameBufferColorDepth|32
+ 
+   #
+@@ -65,7 +65,7 @@
+   #
+   # Debug and Version
+   #
+-  gEfiMdeModulePkgTokenSpaceGuid.PcdFirmwareVersionString|L"J716F UniXNU"
++  gEfiMdeModulePkgTokenSpaceGuid.PcdFirmwareVersionString|L"TB371FC UniXNU"
+ !if $(TARGET) == DEBUG
+   # Keep firmware warnings/errors and UniXNU's default DEBUG_INFO messages.
+   gEfiMdePkgTokenSpaceGuid.PcdDebugPrintErrorLevel|0x80000042
+@@ -74,7 +74,7 @@
+   gEfiMdePkgTokenSpaceGuid.PcdDebugPrintErrorLevel|0x80000000
+   gUniXNUPkgTokenSpaceGuid.PcdUniXNUDebugLevel|0
+ !endif
+-  gUniXNUPkgTokenSpaceGuid.PcdUniXNUDeviceModel|"j716f"
++  gUniXNUPkgTokenSpaceGuid.PcdUniXNUDeviceModel|"tb371fc"
+ !ifdef J716F_MENU_DIAGNOSTIC
+ !if $(J716F_MENU_DIAGNOSTIC) == 1
+   # Explicit diagnostic policy for both built-in and loaded configurations.

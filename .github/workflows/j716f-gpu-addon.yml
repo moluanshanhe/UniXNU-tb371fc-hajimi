@@ -1,0 +1,323 @@
+name: J716F GPU Addon (iOS 17 Turnip + AdrenoMetal)
+
+# Builds the Phase 4b userspace 3D Metal addon for TB-J716F (Adreno 650 v2.0,
+# iPadOS 17.7.11 / arm64-apple-ios17.0) from pinned upstream UniXNU, Mesa Turnip
+# (freedreno Darwin KMD backend), and metal2vulkan translator sources.
+# Contains zero Apple IPSW content, zero OEM firmware, and zero device secrets.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/j716f-gpu-addon.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: j716f-gpu-addon-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-gpu-addon:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Checkout UniXNU core (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: UniXNU/UniXNU
+          ref: e7bddb9a7eecdcf81f36da9fa38bd9d4d3f155c2
+          path: UniXNU
+
+      - name: Initialize required GPU submodules
+        working-directory: UniXNU
+        run: |
+          git submodule update --init --depth 1 \
+            drivers/Adreno740 \
+            drivers/AdrenoMetal \
+            drivers/GopFramebuffer \
+            kits/AdrenoPM4
+
+      - name: Install build toolchain (LLVM, shaders, Bison, Ninja, Rust 1.98.0)
+        run: |
+          brew install llvm glslang shaderc spirv-tools bison ninja cmake rustup
+          {
+            echo "$HOME/.cargo/bin"
+            echo "/opt/homebrew/opt/llvm/bin"
+            echo "/opt/homebrew/opt/bison/bin"
+            echo "/opt/homebrew/opt/rustup/bin"
+          } >> "$GITHUB_PATH"
+          export PATH="/opt/homebrew/opt/rustup/bin:/opt/homebrew/opt/llvm/bin:/opt/homebrew/opt/bison/bin:$HOME/.cargo/bin:$PATH"
+          rustup toolchain install 1.98.0 --profile minimal --target aarch64-apple-ios
+          for tool in clang xcrun codesign llvm-as glslangValidator glslc spirv-val ninja cmake bison cargo; do
+            command -v "$tool" >/dev/null || { echo "Missing tool: $tool" >&2; exit 1; }
+          done
+          xcrun --sdk iphoneos --show-sdk-path
+          llvm-as --version | head -n 2
+          cargo +1.98.0 --version
+
+      - name: Checkout and patch pinned Mesa and metal2vulkan sources
+        working-directory: UniXNU
+        run: |
+          python3 - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+
+          root = Path.cwd()
+          pins = json.loads((root / 'scripts/data/adreno-compiler-inputs.json').read_text())
+          mesa_dir = root / '.cache/mesa-work'
+          mesa_dir.mkdir(parents=True, exist_ok=True)
+          subprocess.run(['git', 'init', '-q', str(mesa_dir)], check=True)
+          mirror = pins['mesa'].get('mirror', pins['mesa']['repository'])
+          subprocess.run(['git', '-C', str(mesa_dir), 'fetch', '--depth=1', mirror, pins['mesa']['commit']], check=True)
+          subprocess.run(['git', '-C', str(mesa_dir), 'checkout', '--detach', 'FETCH_HEAD'], check=True)
+          for patch in pins['patches']:
+              subprocess.run(['git', '-C', str(mesa_dir), 'apply', str(root / patch)], check=True)
+          print('PASS: Mesa checked out and patched:', pins['mesa']['commit'][:12])
+
+          m2v = json.loads((root / 'scripts/data/gpu-metal-vulkan-inputs.json').read_text())['translator']
+          m2v_dir = root / '.cache/gpu-reference/metal2vulkan'
+          m2v_dir.mkdir(parents=True, exist_ok=True)
+          subprocess.run(['git', 'init', '-q', str(m2v_dir)], check=True)
+          subprocess.run(['git', '-C', str(m2v_dir), 'fetch', '--depth=1', m2v['repository'], m2v['commit']], check=True)
+          subprocess.run(['git', '-C', str(m2v_dir), 'checkout', '--detach', 'FETCH_HEAD'], check=True)
+          print('PASS: metal2vulkan checked out:', m2v['commit'][:12])
+          PY
+
+      - name: Create Meson Python virtualenv
+        working-directory: UniXNU
+        run: |
+          python3 -m venv .cache/mesa-venv
+          .cache/mesa-venv/bin/python -m pip install --upgrade pip
+          .cache/mesa-venv/bin/python -m pip install -r scripts/requirements-adreno-compiler.txt
+
+      - name: Build Mesa Turnip (libvulkan_freedreno.dylib for arm64-apple-ios17.0)
+        working-directory: UniXNU
+        run: |
+          python3 scripts/build-turnip-darwin.py --target ios
+          ls -lh build/mesa-tu-ios/src/freedreno/vulkan/libvulkan_freedreno.dylib
+
+      - name: Cache Cargo registry and prebuilt Rust Metal bridge
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            UniXNU/build/adreno-metal-bridge/ios
+          key: j716f-gpu-bridge-${{ runner.os }}-1.98.0-e7bddb9a-a650-v2
+          restore-keys: |
+            j716f-gpu-bridge-${{ runner.os }}-1.98.0-e7bddb9a-
+            j716f-gpu-bridge-${{ runner.os }}-1.98.0-
+            j716f-gpu-cargo-${{ runner.os }}-1.98.0-
+
+      - name: Build NativeAdrenoMetal.bundle + metal2vulkan bridge + adrenoprobed (iOS 17)
+        working-directory: UniXNU
+        run: |
+          python3 - <<'PY'
+          import re, subprocess, textwrap
+          from pathlib import Path
+
+          # 1. Guard iPadOS 27 (24A446) arm64e ptrauth / hardcoded QuartzCore offsets for arm64-apple-ios17.0.
+          p = Path('drivers/AdrenoMetal/NativeAdrenoMetalPlugin.mm')
+          txt = p.read_text()
+          old = "#if !TARGET_OS_OSX\n        // The stored option values and the framebuffer branch are addresses of iPadOS 27's QuartzCore (24A446)."
+          new = "#if !TARGET_OS_OSX && __has_feature(ptrauth_calls)\n        // The stored option values and the framebuffer branch are addresses of iPadOS 27's QuartzCore (24A446)."
+          assert old in txt, 'Expected iPadOS 27 QuartzCore block not found in NativeAdrenoMetalPlugin.mm'
+          p.write_text(txt.replace(old, new, 1))
+          print('PASS: Guarded iPadOS 27 (24A446) ptrauth/QuartzCore block for arm64-apple-ios17.0')
+
+          # 2. MTLBarrierScopeRenderTargets is API_UNAVAILABLE(ios) in the iphoneos SDK headers.
+          #    Keep bit 2 (1UL << 2) accepted on iOS so runtime semantics match while compiling cleanly with -Werror.
+          fe = Path('drivers/AdrenoMetal/NativeBridgeMetalFrontend.mm')
+          fe_txt = fe.read_text()
+          fe_old = " if(scope&~(MTLBarrierScopeBuffers|MTLBarrierScopeTextures|MTLBarrierScopeRenderTargets)) {"
+          fe_new = (
+              "#if TARGET_OS_OSX\n"
+              " const NSUInteger allowedScope=MTLBarrierScopeBuffers|MTLBarrierScopeTextures|MTLBarrierScopeRenderTargets;\n"
+              "#else\n"
+              " const NSUInteger allowedScope=MTLBarrierScopeBuffers|MTLBarrierScopeTextures|(1UL<<2);\n"
+              "#endif\n"
+              " if(scope&~allowedScope) {"
+          )
+          assert fe_old in fe_txt, 'Expected MTLBarrierScopeRenderTargets check not found in NativeBridgeMetalFrontend.mm'
+          fe.write_text(fe_txt.replace(fe_old, fe_new, 1))
+          print('PASS: Guarded MTLBarrierScopeRenderTargets (API_UNAVAILABLE(ios)) in NativeBridgeMetalFrontend.mm')
+
+          # 3. Public iphoneos SDK libSystem.B.tbd omits mach_vm_remap / mach_vm_deallocate / mach_vm_read_overwrite.
+          #    Resolve them dynamically via libc::dlsym(RTLD_DEFAULT, ...) with vm_* fallback (identical 64-bit arm64 ABI).
+          hm = Path('drivers/AdrenoMetal/bridge/NativeMetalHostMapping.rs')
+          hm_txt = hm.read_text()
+          helper = textwrap.dedent('''\
+              #[cfg(target_vendor = "apple")]
+              mod darwin_vm {
+                  use std::ffi::CStr;
+                  use std::sync::OnceLock;
+
+                  unsafe extern "C" {
+                      pub static mach_task_self_: u32;
+                  }
+
+                  type RemapFn = unsafe extern "C" fn(
+                      u32, *mut u64, u64, u64, i32, u32, u64, i32, *mut i32, *mut i32, i32,
+                  ) -> i32;
+                  type DeallocateFn = unsafe extern "C" fn(u32, u64, u64) -> i32;
+                  type ReadOverwriteFn = unsafe extern "C" fn(u32, u64, u64, u64, *mut u64) -> i32;
+
+                  unsafe fn lookup(primary: &CStr, fallback: &CStr) -> *mut libc::c_void {
+                      let p = unsafe { libc::dlsym(libc::RTLD_DEFAULT, primary.as_ptr()) };
+                      if !p.is_null() {
+                          return p;
+                      }
+                      unsafe { libc::dlsym(libc::RTLD_DEFAULT, fallback.as_ptr()) }
+                  }
+
+                  pub unsafe fn mach_vm_remap(
+                      target: u32, address: *mut u64, length: u64, mask: u64, flags: i32,
+                      source: u32, source_address: u64, copy: i32,
+                      current: *mut i32, maximum: *mut i32, inheritance: i32,
+                  ) -> i32 {
+                      static FN: OnceLock<Option<RemapFn>> = OnceLock::new();
+                      let f = *FN.get_or_init(|| {
+                          let p = unsafe { lookup(c"mach_vm_remap", c"vm_remap") };
+                          (!p.is_null()).then(|| unsafe { std::mem::transmute::<*mut libc::c_void, RemapFn>(p) })
+                      });
+                      match f {
+                          Some(func) => unsafe {
+                              func(target, address, length, mask, flags, source, source_address, copy, current, maximum, inheritance)
+                          },
+                          None => 46,
+                      }
+                  }
+
+                  pub unsafe fn mach_vm_deallocate(task: u32, address: u64, length: u64) -> i32 {
+                      static FN: OnceLock<Option<DeallocateFn>> = OnceLock::new();
+                      let f = *FN.get_or_init(|| {
+                          let p = unsafe { lookup(c"mach_vm_deallocate", c"vm_deallocate") };
+                          (!p.is_null()).then(|| unsafe { std::mem::transmute::<*mut libc::c_void, DeallocateFn>(p) })
+                      });
+                      match f {
+                          Some(func) => unsafe { func(task, address, length) },
+                          None => 46,
+                      }
+                  }
+
+                  pub unsafe fn mach_vm_read_overwrite(
+                      task: u32, source: u64, length: u64, destination: u64, copied: *mut u64,
+                  ) -> i32 {
+                      static FN: OnceLock<Option<ReadOverwriteFn>> = OnceLock::new();
+                      let f = *FN.get_or_init(|| {
+                          let p = unsafe { lookup(c"mach_vm_read_overwrite", c"vm_read_overwrite") };
+                          (!p.is_null()).then(|| unsafe { std::mem::transmute::<*mut libc::c_void, ReadOverwriteFn>(p) })
+                      });
+                      match f {
+                          Some(func) => unsafe { func(task, source, length, destination, copied) },
+                          None => 46,
+                      }
+                  }
+              }
+
+          ''')
+          anchor_hm = 'use std::ptr::NonNull;\n'
+          assert anchor_hm in hm_txt, 'Expected NonNull import in NativeMetalHostMapping.rs'
+          hm_txt = hm_txt.replace(anchor_hm, anchor_hm + '\n' + helper, 1)
+
+          for pat, repl, label in [
+              (r'unsafe extern "C" \{[^}]*fn mach_vm_remap[^}]*\}', 'use darwin_vm::{mach_task_self_, mach_vm_deallocate, mach_vm_remap};', 'alias extern'),
+              (r'unsafe extern "C" \{[^}]*fn mach_vm_deallocate[^}]*\}', 'use darwin_vm::{mach_task_self_, mach_vm_deallocate};', 'drop extern'),
+              (r'unsafe extern "C" \{[^}]*fn mach_vm_read_overwrite[^}]*\}', 'use darwin_vm::{mach_task_self_, mach_vm_read_overwrite};', 'copy_readable extern'),
+          ]:
+              hm_txt, n = re.subn(pat, repl, hm_txt, count=1, flags=re.S)
+              assert n == 1, f'Expected {label} block not found in NativeMetalHostMapping.rs'
+          hm.write_text(hm_txt)
+          print('PASS: Switched NativeMetalHostMapping.rs mach_vm_* calls to runtime dlsym(RTLD_DEFAULT) for iphoneos SDK')
+
+          # 4. Adreno 650 (a6xx_gen3) sets storage_16bit=True and storage_8bit=False in Mesa freedreno_devices.py,
+          #    so Turnip reports VkPhysicalDeviceVulkan12Features.storageBuffer8BitAccess = FALSE.
+          #    metal2vulkan already lowers 8-bit accesses cleanly when storage_buffer_8bit is false (memory/leaf.rs),
+          #    so move storage_buffer8_bit_access from REQUIRED to OPTIONAL in metal2vulkan-runtime/src/floor.rs.
+          m2v = Path('.cache/gpu-reference/metal2vulkan')
+          floor_rs = m2v / 'crates/metal2vulkan-runtime/src/floor.rs'
+          fl_txt = floor_rs.read_text()
+          req_line = '    feature!(vulkan12.storage_buffer8_bit_access => StorageBuffer8BitAccess),\n'
+          opt_anchor = 'pub(crate) const OPTIONAL: &[Feature] = &[\n'
+          assert req_line in fl_txt, 'Expected storage_buffer8_bit_access in REQUIRED of floor.rs'
+          assert opt_anchor in fl_txt, 'Expected OPTIONAL table in floor.rs'
+          fl_txt = fl_txt.replace(req_line, '', 1).replace(opt_anchor, opt_anchor + req_line, 1)
+          floor_rs.write_text(fl_txt)
+          patches_dir = Path('drivers/AdrenoMetal/bridge/patches')
+          patches_dir.mkdir(parents=True, exist_ok=True)
+          patch_out = patches_dir / '0001-a650-optional-storage-8bit.patch'
+          diff = subprocess.check_output(['git', '-C', str(m2v), 'diff'], text=True)
+          assert diff.strip(), 'Generated 0001-a650-optional-storage-8bit.patch is empty'
+          patch_out.write_text(diff)
+          subprocess.run(['git', '-C', str(m2v), 'reset', '--hard', '-q', 'HEAD'], check=True)
+          subprocess.run(['git', '-C', str(m2v), 'clean', '-fdq'], check=True)
+          print('PASS: Generated 0001-a650-optional-storage-8bit.patch for Adreno 650')
+
+          # 4b. Shorten device refusal prefix in NativeMetalBridge.rs so 64-byte kernel telemetry shows full detail.
+          nb = Path('drivers/AdrenoMetal/bridge/NativeMetalBridge.rs')
+          nb_txt = nb.read_text()
+          nb_old = 'Err(format!("no bundled Vulkan device meets the runtime contract: {}", refusals.join("; ")))'
+          nb_new = 'Err(format!("vk: {}", refusals.join("; ")))'
+          assert nb_old in nb_txt, 'Expected refusal format string in NativeMetalBridge.rs'
+          nb.write_text(nb_txt.replace(nb_old, nb_new, 1))
+          print('PASS: Shortened NativeMetalBridge.rs refusal prefix for telemetry visibility')
+
+          # 5. Register 0001-a650-optional-storage-8bit.patch and switch release LTO from fat/1 to thin/4 for CI budgets.
+          bridge_py = Path('scripts/build-adreno-metal-bridge.py')
+          b_txt = bridge_py.read_text()
+          p_old = "PATCHES = [ROOT / 'drivers/AdrenoMetal/bridge/patches' / name for name in [\n]]"
+          p_new = "PATCHES = [ROOT / 'drivers/AdrenoMetal/bridge/patches' / name for name in [\n    '0001-a650-optional-storage-8bit.patch',\n]]"
+          assert p_old in b_txt, 'Expected empty PATCHES list in build-adreno-metal-bridge.py'
+          b_txt = b_txt.replace(p_old, p_new, 1)
+          lto_old = "'[profile.release]', 'panic = \"unwind\"', 'debug = 1', 'lto = \"fat\"', 'codegen-units = 1', '',"
+          lto_new = "'[profile.release]', 'panic = \"unwind\"', 'debug = 1', 'lto = \"thin\"', 'codegen-units = 4', '',"
+          assert lto_old in b_txt, 'Expected release LTO profile not found in build-adreno-metal-bridge.py'
+          bridge_py.write_text(b_txt.replace(lto_old, lto_new, 1))
+          print('PASS: Registered A650 floor patch and enabled thin LTO in build-adreno-metal-bridge.py')
+
+          # 6. On arm64-apple-ios17.0, ld with -undefined dynamic_lookup emits classic LC_DYLD_INFO_ONLY
+          #    instead of LC_DYLD_CHAINED_FIXUPS; make the optional weak-import self-bind step skip cleanly.
+          sb_py = Path('scripts/macho-self-bind-weak-imports.py')
+          sb_txt = sb_py.read_text()
+          sb_old = "if fixups is None:\n    sys.exit(path + ': no chained fixups')"
+          sb_new = "if fixups is None:\n    print(path + ': no chained fixups (classic LC_DYLD_INFO_ONLY); skipping self-bind')\n    sys.exit(0)"
+          assert sb_old in sb_txt, 'Expected fixups check not found in macho-self-bind-weak-imports.py'
+          sb_py.write_text(sb_txt.replace(sb_old, sb_new, 1))
+          print('PASS: Allowed classic LC_DYLD_INFO_ONLY in macho-self-bind-weak-imports.py for arm64-apple-ios17.0')
+          PY
+          python3 scripts/build-adreno-metal-plugin.py --target ios --no-replay --reuse-bridge || {
+            echo "=== tail build-ios.log ==="
+            tail -n 120 build/adreno-metal-bridge/build-ios.log 2>/dev/null || true
+            exit 1
+          }
+          ls -lh build/adreno-metal-plugin/NativeAdrenoMetal.bundle/
+          cat build/adreno-metal-plugin/trust.json
+
+      - name: Pack NGPUADD2 GPU addons (no-daemon and with-daemon variants)
+        working-directory: UniXNU
+        run: |
+          mkdir -p out/j716f-gpu-addon
+          python3 scripts/make-gpu-addon.py --publish --no-daemon out/j716f-gpu-addon/gpuaddon-nodaemon.bin
+          python3 scripts/make-gpu-addon.py --publish out/j716f-gpu-addon/gpuaddon-with-daemon.bin
+          cp build/adreno-metal-plugin/trust.json out/j716f-gpu-addon/trust.json
+          cp build/adreno-metal-plugin/NativeAdrenoMetal.bundle/gpu-build.json out/j716f-gpu-addon/gpu-build.json
+          (cd out/j716f-gpu-addon && shasum -a 256 gpuaddon-*.bin trust.json gpu-build.json > SHA256SUMS.txt)
+          cat out/j716f-gpu-addon/SHA256SUMS.txt
+          ls -lh out/j716f-gpu-addon/
+
+      - name: Upload J716F iOS 17 GPU addon artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: j716f-gpu-addon-ios17
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            UniXNU/out/j716f-gpu-addon/gpuaddon-nodaemon.bin
+            UniXNU/out/j716f-gpu-addon/gpuaddon-with-daemon.bin
+            UniXNU/out/j716f-gpu-addon/trust.json
+            UniXNU/out/j716f-gpu-addon/gpu-build.json
+            UniXNU/out/j716f-gpu-addon/SHA256SUMS.txt
