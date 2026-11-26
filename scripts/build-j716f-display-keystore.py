@@ -661,6 +661,12 @@ def main() -> None:
     board_hid_src = input_dir / 'J716fHidInputProbe.cpp'
     touch_state_src = input_dir / 'J716fTouchState.cpp'
     touch_probe_src = input_dir / 'J716fTouchProbe.cpp'
+    tb_touch_dir = input_dir / 'tb371fc_touch'
+    tb_geni_spi_src = tb_touch_dir / 'GeniSpi.c'
+    tb_nvt_proto_src = tb_touch_dir / 'NvtProtocol.c'
+    tb_touch_report_src = tb_touch_dir / 'Tb371fcTouchReport.c'
+    tb_touch_fw_src = tb_touch_dir / 'Tb371fcTouchFirmware.c'
+    tb_touch_probe_src = tb_touch_dir / 'Tb371fcTouchProbe.cpp'
     buttons_src = input_dir / 'J716fButtons.c'
     rpmh_src = input_dir / 'J716fQcomRpmh.c'
     power_dir = ROOT / 'kits/j716f/power'
@@ -718,6 +724,11 @@ def main() -> None:
         board_hid_src,
         touch_state_src,
         touch_probe_src,
+        tb_geni_spi_src,
+        tb_nvt_proto_src,
+        tb_touch_report_src,
+        tb_touch_fw_src,
+        tb_touch_probe_src,
         buttons_src,
         rpmh_src,
         cpufreq_src,
@@ -916,6 +927,11 @@ def main() -> None:
     board_hid_obj = OUT / 'J716fHidInputProbe.o'
     touch_state_obj = OUT / 'J716fTouchState.o'
     touch_probe_obj = OUT / 'J716fTouchProbe.o'
+    tb_geni_spi_obj = OUT / 'Tb371fcGeniSpi.o'
+    tb_nvt_proto_obj = OUT / 'Tb371fcNvtProtocol.o'
+    tb_touch_report_obj = OUT / 'Tb371fcTouchReport.o'
+    tb_touch_fw_obj = OUT / 'Tb371fcTouchFirmware.o'
+    tb_touch_probe_obj = OUT / 'Tb371fcTouchProbe.o'
     buttons_obj = OUT / 'J716fButtons.o'
     rpmh_obj = OUT / 'J716fQcomRpmh.o'
     cpufreq_obj = OUT / 'J716fCpuFreq.o'
@@ -1066,6 +1082,11 @@ def main() -> None:
     compile_cxx_from_record(record, board_hid_src, board_hid_obj, ['-I', str(input_dir)], allow_warnings=False)
     compile_cxx_from_record(record, touch_state_src, touch_state_obj, ['-I', str(input_dir)], allow_warnings=False)
     compile_cxx_from_record(record, touch_probe_src, touch_probe_obj, ['-I', str(input_dir)], allow_warnings=True)
+    compile_c_from_record(c_record, record, tb_geni_spi_src, tb_geni_spi_obj, ['-I', str(tb_touch_dir)], allow_warnings=True)
+    compile_c_from_record(c_record, record, tb_nvt_proto_src, tb_nvt_proto_obj, ['-I', str(tb_touch_dir)], allow_warnings=True)
+    compile_c_from_record(c_record, record, tb_touch_report_src, tb_touch_report_obj, ['-I', str(tb_touch_dir)], allow_warnings=True)
+    compile_c_from_record(c_record, record, tb_touch_fw_src, tb_touch_fw_obj, [], allow_warnings=True)
+    compile_cxx_from_record(record, tb_touch_probe_src, tb_touch_probe_obj, ['-I', str(tb_touch_dir), '-I', str(input_dir)], allow_warnings=True)
     compile_c_from_record(c_record, record, buttons_src, buttons_obj, ['-I', str(input_dir)], allow_warnings=False)
     compile_c_from_record(c_record, record, rpmh_src, rpmh_obj, ['-I', str(input_dir)], allow_warnings=False)
     compile_cxx_from_record(record, cpufreq_src, cpufreq_obj, [], allow_warnings=False)
@@ -1194,6 +1215,11 @@ def main() -> None:
         board_hid_obj,
         touch_state_obj,
         touch_probe_obj,
+        tb_geni_spi_obj,
+        tb_nvt_proto_obj,
+        tb_touch_report_obj,
+        tb_touch_fw_obj,
+        tb_touch_probe_obj,
         buttons_obj,
         rpmh_obj,
         cpufreq_obj,
@@ -1228,6 +1254,11 @@ def main() -> None:
         board_hid_src,
         touch_state_src,
         touch_probe_src,
+        tb_geni_spi_src,
+        tb_nvt_proto_src,
+        tb_touch_report_src,
+        tb_touch_fw_src,
+        tb_touch_probe_src,
         buttons_src,
         rpmh_src,
         cpufreq_src,

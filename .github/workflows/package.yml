@@ -143,6 +143,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           OS_TARGET: ${{ inputs.os || '17' }}
           DATA_SEED: ${{ runner.temp }}/tb371fc-data-seed-artifact/data-21H461.dbr
+          J716F_GPU_FIRMWARE_DIR: ${{ github.workspace }}/device/package/firmware/gpu
         run: |
           if [ "${{ inputs.check_only }}" = "true" ]; then
             scripts/package.sh --os "$OS_TARGET" --check --uefi ../uefi-j716f

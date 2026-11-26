@@ -73,9 +73,9 @@ header_version = 2
 pagesize = 4096
 
 [userdata]
-# TB371FC (128GB) LUN 0 GPT geometry for userdata (first_lba verified from stock gpt_main0.bin).
+# TB371FC (128GB) LUN 0 GPT geometry for userdata (first_lba from stock gpt_main0.bin, last_lba verified via fastboot getvar).
 first_lba = 3308072
-last_lba = 30693370
+last_lba = 30693358
 lba_bytes = 4096
 
 [payload]
@@ -115,6 +115,7 @@ kernel_args = [
   "offline-hid-input=1",
   "offline-hid-home=1",
   "touch-hid=1",
+  "tb371fc-touch=1",
   "j716f-buttons=1",
 ]
 timeout = -1

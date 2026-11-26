@@ -36,6 +36,7 @@ extern "C" void j716f_keystore_probe(void);
 extern "C" void j716f_hid_input_probe(void);
 extern "C" void j716f_usb_debug_probe(void);
 extern "C" void j716f_touch_probe(void);
+extern "C" void tb371fc_touch_start(void);
 extern "C" void j716f_buttons_probe(void);
 extern "C" void j716f_cpufreq_probe(void);
 extern "C" void j716f_battery_probe(void);
@@ -306,6 +307,7 @@ void native_legacy_display_late_probe(void) {
   j716f_hid_input_probe();
   j716f_usb_debug_probe();
   j716f_touch_probe();
+  tb371fc_touch_start();
   j716f_buttons_probe();
   j716f_cpufreq_probe();
   j716f_battery_probe();
