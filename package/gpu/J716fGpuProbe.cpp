@@ -88,6 +88,7 @@ extern void native_adreno_gpu_interrupt(uint32_t status) __attribute__((weak));
 extern volatile uint32_t native_adreno_cp_aperture[4] __attribute__((weak));
 extern volatile uint32_t native_adreno_cp_check[6] __attribute__((weak));
 extern volatile uint32_t native_adreno_io_coherent __attribute__((weak));
+extern volatile uint32_t native_adreno_owned_coherent __attribute__((weak));
 extern volatile uint32_t native_adreno_wc_enabled __attribute__((weak));
 extern volatile uint32_t j716f_gpu_actlr_before __attribute__((weak));
 extern volatile uint32_t j716f_gpu_actlr_after __attribute__((weak));
@@ -1376,7 +1377,15 @@ void runMode10And11Kmd() {
         return;
     }
 
-    if (&native_adreno_io_coherent) native_adreno_io_coherent = 0u;
+    unsigned ioCoh = 0u, ownedCoh = 0u;
+    PE_parse_boot_argn("gpu-io-coherent", &ioCoh, sizeof(ioCoh));
+    PE_parse_boot_argn("gpu-owned-coherent", &ownedCoh, sizeof(ownedCoh));
+    if (ownedCoh) ioCoh = 1u;
+    if (&native_adreno_io_coherent) native_adreno_io_coherent = ioCoh ? 1u : 0u;
+    if (&native_adreno_owned_coherent) native_adreno_owned_coherent = (ioCoh && ownedCoh) ? 1u : 0u;
+    if (ioCoh && ownedCoh) {
+        gA650DeviceInfo.flags |= NativeAdrenoDeviceCachedCoherent;
+    }
     if (&native_adreno_wc_enabled) {
         unsigned wc = 1u;
         PE_parse_boot_argn("gpu-wc", &wc, sizeof(wc));
@@ -1389,7 +1398,7 @@ void runMode10And11Kmd() {
                                                  timerRc == kIOReturnSuccess ? &gKmdTimer : nullptr,
                                                  &gA650DeviceInfo, ias, 36u);
     snprintf(kmdRow, cap,
-             "KMD pub=%x tm=%u cpchk=%x/%x/%x/%x/%x ap2=%x tmr=%x",
+             "KMD pub=%x tm=%u cpchk=%x/%x/%x/%x/%x ap2=%x tmr=%x coh=%u/%u",
              static_cast<unsigned>(pubRc),
              &native_adreno_cp_aperture ? native_adreno_cp_aperture[3] : 0u,
              &native_adreno_cp_check ? native_adreno_cp_check[0] : 0xDEADu,
@@ -1398,7 +1407,8 @@ void runMode10And11Kmd() {
              &native_adreno_cp_check ? native_adreno_cp_check[3] : 0xDEADu,
              &native_adreno_cp_check ? native_adreno_cp_check[4] : 0xDEADu,
              &native_adreno_cp_aperture ? native_adreno_cp_aperture[2] : 0xDEADu,
-             static_cast<unsigned>(timerRc));
+             static_cast<unsigned>(timerRc),
+             ioCoh ? 1u : 0u, (ioCoh && ownedCoh) ? 1u : 0u);
     IOLog("[J716F gpu] [live] %s\n", kmdRow);
 
     IOService *svc = (pubRc == kIOReturnSuccess) ? native_adreno_published_service() : nullptr;
