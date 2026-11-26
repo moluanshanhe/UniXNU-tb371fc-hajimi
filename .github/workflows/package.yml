@@ -92,17 +92,62 @@ jobs:
             exit 1
           fi
 
+      - name: Select Python 3.12 for Data seed builder
+        id: python
+        if: ${{ inputs.check_only != true }}
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Checkout pinned UniXNU core for Data seed creation
+        if: ${{ inputs.check_only != true }}
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: UniXNU/UniXNU
+          ref: 7b730b231746667d8b7f54746c2c1ce45852611c
+          path: .ci-unixnu
+          persist-credentials: false
+          submodules: false
+
+      - name: Create and verify fresh Data seed (data-21H461.dbr)
+        if: ${{ inputs.check_only != true }}
+        env:
+          PYTHON_BIN: ${{ steps.python.outputs.python-path }}
+          DATA_ARTIFACT: ${{ runner.temp }}/tb371fc-data-seed-artifact
+        run: |
+          git -C .ci-unixnu submodule update --init --depth=1 drivers/DarwinBoot
+          sudo -n "$PYTHON_BIN" device/scripts/ci/make_data_seed.py \
+            --core "$GITHUB_WORKSPACE/.ci-unixnu" \
+            --work "$RUNNER_TEMP/tb371fc-data-seed-work" \
+            --output "$DATA_ARTIFACT" \
+            --evidence "$RUNNER_TEMP/tb371fc-data-seed-evidence" \
+            --gib 16
+          sudo -n chown -R "$(id -u):$(id -g)" "$DATA_ARTIFACT"
+          sudo -n rm -rf "$RUNNER_TEMP/tb371fc-data-seed-work" "$GITHUB_WORKSPACE/.ci-unixnu"
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          meta = json.loads((Path(os.environ["DATA_ARTIFACT"]) / "data-21H461.json").read_text())
+          uuid = meta["data_volume_uuid"]
+          cfg = Path("device/configs/j716f_defconfig")
+          text = cfg.read_text()
+          updated = re.sub(r'CONFIG_XNU_OWNER_DATA_VOLUME_UUID="[^"]+"', f'CONFIG_XNU_OWNER_DATA_VOLUME_UUID="{uuid}"', text)
+          cfg.write_text(updated)
+          print(f"Bound fresh Data UUID: {uuid}")
+          PY
+
       - name: Run scripts/package.sh
         working-directory: device
         env:
           UNIXNU_UNIQUE_CHIP_ID: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
           GITHUB_TOKEN: ${{ github.token }}
           OS_TARGET: ${{ inputs.os || '17' }}
+          DATA_SEED: ${{ runner.temp }}/tb371fc-data-seed-artifact/data-21H461.dbr
         run: |
           if [ "${{ inputs.check_only }}" = "true" ]; then
             scripts/package.sh --os "$OS_TARGET" --check --uefi ../uefi-j716f
           else
-            scripts/package.sh --os "$OS_TARGET" --uefi ../uefi-j716f
+            scripts/package.sh --os "$OS_TARGET" --uefi ../uefi-j716f --data-ramdisk "$DATA_SEED"
           fi
 
       - name: Upload images
@@ -117,3 +162,5 @@ jobs:
             UniXNU/out/j716f/*/*/payload/payload.img
             UniXNU/out/j716f/*/*/kernel/kernel.macho
             UniXNU/out/j716f/*/*/package.manifest.json
+            ${{ runner.temp }}/tb371fc-data-seed-artifact/data-21H461.dbr
+            ${{ runner.temp }}/tb371fc-data-seed-artifact/data-21H461.json
