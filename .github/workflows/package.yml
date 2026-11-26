@@ -13,6 +13,8 @@ name: package
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - ".github/workflows/j716f-gpu-addon.yml"
   workflow_dispatch:
     inputs:
       os:

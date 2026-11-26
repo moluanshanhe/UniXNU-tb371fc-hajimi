@@ -86,7 +86,17 @@ jobs:
           print('PASS: metal2vulkan checked out:', m2v['commit'][:12])
           PY
 
+      - name: Cache prebuilt Mesa Turnip (libvulkan_freedreno.dylib)
+        id: turnip-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            UniXNU/build/mesa-tu-ios/src/freedreno/vulkan/libvulkan_freedreno.dylib
+            UniXNU/build/mesa-tu-ios/builtin-build-profile.json
+          key: j716f-turnip-${{ runner.os }}-e7bddb9a-v1
+
       - name: Create Meson Python virtualenv
+        if: steps.turnip-cache.outputs.cache-hit != 'true'
         working-directory: UniXNU
         run: |
           python3 -m venv .cache/mesa-venv
@@ -94,6 +104,7 @@ jobs:
           .cache/mesa-venv/bin/python -m pip install -r scripts/requirements-adreno-compiler.txt
 
       - name: Build Mesa Turnip (libvulkan_freedreno.dylib for arm64-apple-ios17.0)
+        if: steps.turnip-cache.outputs.cache-hit != 'true'
         working-directory: UniXNU
         run: |
           python3 scripts/build-turnip-darwin.py --target ios
@@ -139,11 +150,27 @@ jobs:
               "        gpu->mark(0x6802);\n"
               "        static Gpu *gRenderGpu;\n"
               "        gRenderGpu = gpu;\n"
+              "        static int gMtblCount;\n"
               "        native_bridge_metal_problem_hook = [](const char *problem) {\n"
               "            if (!gRenderGpu || !problem) return;\n"
               "            streamText(*gRenderGpu, problem);\n"
               "            const size_t len = strlen(problem);\n"
               "            if (len > 63) streamText7(*gRenderGpu, problem + 63);\n"
+              "            const int slot = __atomic_fetch_add(&gMtblCount, 1, __ATOMIC_RELAXED);\n"
+              "            if (slot >= 0 && slot < 2) {\n"
+              "                const unsigned baseRow = static_cast<unsigned>(slot * 4);\n"
+              "                for (unsigned r = 0; r < 4; ++r) {\n"
+              "                    const size_t off = r * 90u;\n"
+              "                    if (off >= len) break;\n"
+              "                    const size_t chunk = (len - off > 90u) ? 90u : (len - off);\n"
+              "                    gRenderGpu->mark(0xC000u | (baseRow + r));\n"
+              "                    for (size_t i = 0; i < chunk; i += 2) {\n"
+              "                        const unsigned a = (unsigned char)problem[off + i] & 0x7fu;\n"
+              "                        const unsigned b = (i + 1 < chunk) ? ((unsigned char)problem[off + i + 1] & 0x7fu) : 0u;\n"
+              "                        gRenderGpu->mark(0x8000u | (a << 7) | b);\n"
+              "                    }\n"
+              "                }\n"
+              "            }\n"
               "        };\n"
           )
           assert hook_old in txt, 'Expected 0x6802 marker not found in NativeAdrenoMetalPlugin.mm'
@@ -192,7 +219,11 @@ jobs:
           rp_old = '  if(told.fetch_add(1)<64)NBLOG(@"native-metal: render pipeline refused: %@",why);else noteProblem([@"render pipeline: " stringByAppendingString:why]);\n'
           rp_new = (
               '  if(told.fetch_add(1)<64)NBLOG(@"native-metal: render pipeline refused: %@",why);\n'
-              '  noteProblem([@"rp: " stringByAppendingString:why]);\n'
+              '  noteProblem([NSString stringWithFormat:@"f=%@ v=%@ c=%lu/%lu b=%d/%d d=%lu s=%lu | %@",\n'
+              '      d.fragmentFunction.name?:@"-",d.vertexFunction.name?:@"-",\n'
+              '      (unsigned long)d.colorAttachments[0].pixelFormat,(unsigned long)d.colorAttachments[1].pixelFormat,\n'
+              '      (int)d.colorAttachments[0].blendingEnabled,(int)d.colorAttachments[1].blendingEnabled,\n'
+              '      (unsigned long)d.depthAttachmentPixelFormat,(unsigned long)d.stencilAttachmentPixelFormat,why]);\n'
           )
           assert rp_old in fe_txt, 'Expected render pipeline refusal log not found'
           fe.write_text(fe_txt.replace(rp_old, rp_new, 1))
