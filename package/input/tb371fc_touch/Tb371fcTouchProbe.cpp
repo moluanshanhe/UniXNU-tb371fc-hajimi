@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause-Patent
 // TB371FC Novatek NT36532 SPI touchscreen runtime integrated with J716fTouchState / NativeHidInput.
-// Auto-selects Tianma (GPIO82=1, PID 0x6068) or BOE (GPIO82=0, PID 0x6067) firmware.
+// Auto-selects Tianma (GPIO82=1, PID 0x6068, novatek_ts_tm_fw_6.bin) or BOE (GPIO82=0, PID 0x6067, novatek_ts_fw_boe_6.bin).
 #include <IOKit/IODeviceMemory.h>
 #include <IOKit/IOLib.h>
 #include <IOKit/IOMemoryDescriptor.h>
@@ -64,7 +64,50 @@ struct Session {
     const uint8_t *fwBlob = nullptr;
     uint32_t fwSize = 0;
     uint16_t expectedPid = 0;
+    bool highRes16 = true;
 };
+
+volatile uint32_t gCalSeq = 0;
+Tb371fcTouchCal gCal = {0u, TB371FC_TOUCH_RAW_X_MAX, 0u, TB371FC_TOUCH_RAW_Y_MAX, 1u, 0u, 1u};
+bool gCalLockedByUser = false;
+
+volatile uint32_t gDiagFwVer = 0, gDiagPid = 0, gDiagSuperRes = 0, gDiagHighRes = 0;
+volatile uint32_t gDiagInfoX = 0, gDiagInfoY = 0;
+volatile uint32_t gLastRawX = 0, gLastRawY = 0, gLastHidX = 0, gLastHidY = 0, gLastCount = 0;
+volatile uint32_t gObsMinX = 0xFFFFu, gObsMaxX = 0u, gObsMinY = 0xFFFFu, gObsMaxY = 0u;
+
+Tb371fcTouchCal loadCalSnapshot() {
+    for (;;) {
+        const uint32_t s1 = __atomic_load_n(&gCalSeq, __ATOMIC_ACQUIRE);
+        if (s1 & 1u) continue;
+        const Tb371fcTouchCal copy = gCal;
+        const uint32_t s2 = __atomic_load_n(&gCalSeq, __ATOMIC_ACQUIRE);
+        if (s1 == s2) return copy;
+    }
+}
+
+void storeCalSnapshot(const Tb371fcTouchCal &next, bool userLocked) {
+    uint32_t seq = __atomic_load_n(&gCalSeq, __ATOMIC_RELAXED);
+    if (seq & 1u) ++seq;
+    __atomic_store_n(&gCalSeq, seq + 1u, __ATOMIC_RELEASE);
+    gCal = next;
+    if (userLocked) gCalLockedByUser = true;
+    __atomic_store_n(&gCalSeq, seq + 2u, __ATOMIC_RELEASE);
+}
+
+void loadBootArgCal() {
+    Tb371fcTouchCal c = loadCalSnapshot();
+    bool touched = false;
+    unsigned v = 0;
+    if (PE_parse_boot_argn("tb371fc-touch-xmin", &v, sizeof v) && v < 65535u) { c.x_min = (uint16_t)v; touched = true; }
+    if (PE_parse_boot_argn("tb371fc-touch-xmax", &v, sizeof v) && v <= 65535u && v > c.x_min) { c.x_max = (uint16_t)v; touched = true; }
+    if (PE_parse_boot_argn("tb371fc-touch-ymin", &v, sizeof v) && v < 65535u) { c.y_min = (uint16_t)v; touched = true; }
+    if (PE_parse_boot_argn("tb371fc-touch-ymax", &v, sizeof v) && v <= 65535u && v > c.y_min) { c.y_max = (uint16_t)v; touched = true; }
+    if (PE_parse_boot_argn("tb371fc-touch-swapxy", &v, sizeof v)) { c.swap_xy = v ? 1u : 0u; touched = true; }
+    if (PE_parse_boot_argn("tb371fc-touch-flipx", &v, sizeof v)) { c.flip_x = v ? 1u : 0u; touched = true; }
+    if (PE_parse_boot_argn("tb371fc-touch-flipy", &v, sizeof v)) { c.flip_y = v ? 1u : 0u; touched = true; }
+    if (touched) storeCalSnapshot(c, true);
+}
 
 uint64_t clockRate(uint32_t cfg, uint32_t m, uint32_t n) {
     unsigned source = (cfg >> 8) & 7, hid = cfg & 31, mode = (cfg >> 12) & 3;
@@ -106,8 +149,21 @@ void reset(void *context, int asserted) {
     wr(s->resetPin.va, 0, (TB371FC_TOUCH_DRIVE_6MA << 6) | (1u << 9));
 }
 
-void publishFrame(const Session &s, const Tb371fcTouchFrame &frame) {
+bool sameFrame(const Tb371fcTouchFrame &a, const Tb371fcTouchFrame &b) {
+    if (a.count != b.count) return false;
+    for (unsigned i = 0; i < a.count; ++i) {
+        if (a.contacts[i].id != b.contacts[i].id ||
+            a.contacts[i].x != b.contacts[i].x ||
+            a.contacts[i].y != b.contacts[i].y) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void publishFrame(const Tb371fcTouchFrame &frame) {
     if (__atomic_load_n(&native_touch_injecting, __ATOMIC_ACQUIRE)) return;
+    const Tb371fcTouchCal cal = loadCalSnapshot();
     uint32_t seq = native_touch_seq;
     if (seq & 1u) ++seq;
     native_touch_seq = seq + 1u;
@@ -115,21 +171,26 @@ void publishFrame(const Session &s, const Tb371fcTouchFrame &frame) {
 
     unsigned count = frame.count;
     if (count > TB371FC_TOUCH_CONTACTS) count = TB371FC_TOUCH_CONTACTS;
-    const bool landscapeDirect = (s.info.abs_x_max == 2944u && s.info.abs_y_max == 1840u);
     for (unsigned i = 0; i < count; ++i) {
-        uint16_t x = 0, y = 0;
-        if (landscapeDirect) {
-            uint16_t rx = frame.contacts[i].x > 2944u ? 2944u : frame.contacts[i].x;
-            uint16_t ry = frame.contacts[i].y > 1840u ? 1840u : frame.contacts[i].y;
-            x = static_cast<uint16_t>(((uint32_t)rx * (TB371FC_HID_INPUT_X_MAX - 1u) + 1472u) / 2944u);
-            y = static_cast<uint16_t>(((uint32_t)ry * (TB371FC_HID_INPUT_Y_MAX - 1u) + 920u) / 1840u);
-        } else {
-            tb371fc_touch_to_hid(frame.contacts[i].x, frame.contacts[i].y, &x, &y);
+        const uint16_t rx = frame.contacts[i].x;
+        const uint16_t ry = frame.contacts[i].y;
+        uint16_t hx = 0, hy = 0;
+        tb371fc_touch_map_calibrated(rx, ry, &cal, &hx, &hy);
+        if (rx < gObsMinX) gObsMinX = rx;
+        if (rx > gObsMaxX) gObsMaxX = rx;
+        if (ry < gObsMinY) gObsMinY = ry;
+        if (ry > gObsMaxY) gObsMaxY = ry;
+        if (i == 0u) {
+            gLastRawX = rx;
+            gLastRawY = ry;
+            gLastHidX = hx;
+            gLastHidY = hy;
         }
         native_touch_ids[i] = frame.contacts[i].id;
-        native_touch_xs[i] = x;
-        native_touch_ys[i] = y;
+        native_touch_xs[i] = hx;
+        native_touch_ys[i] = hy;
     }
+    gLastCount = count;
     native_touch_count = count;
     __asm__ volatile("dmb ish" ::: "memory");
     native_touch_seq = seq + 2u;
@@ -229,18 +290,43 @@ bool download(Session &s) {
         return stage(6, rc);
     }
     rc = nvt_start_reports(&s.chip, &s.info);
-    IOLog("[TB371FC touch] firmware=%02x pid=%04x range=%ux%u cascade=%u start=%d\n", s.info.fw_ver,
-          s.info.pid, s.info.abs_x_max, s.info.abs_y_max, s.chip.cascade, rc);
-    const bool rangeOk =
+    // Stock ZUI *_6.bin production firmwares (fw_ver 0x1a Tianma / 0x18 BOE, super_res=0xf1)
+    // emit 16-bit big-endian 10x super-resolution points in 0..18400 x 0..29440 (verified in
+    // stock nvt_ts_work_func + V135 Tb371fcTouchReport.c), regardless of EVENT_FWINFO b[4..7].
+    s.highRes16 = (s.info.fw_ver >= 0x10u) || (s.info.super_res == 0xf1u) ||
+                  (s.info.abs_x_max == TB371FC_TOUCH_RAW_X_MAX && s.info.abs_y_max == TB371FC_TOUCH_RAW_Y_MAX);
+    gDiagFwVer = s.info.fw_ver;
+    gDiagPid = s.info.pid;
+    gDiagSuperRes = s.info.super_res;
+    gDiagHighRes = s.highRes16 ? 1u : 0u;
+    gDiagInfoX = s.info.abs_x_max;
+    gDiagInfoY = s.info.abs_y_max;
+
+    IOLog("[TB371FC touch] firmware=%02x pid=%04x sres=%02x high16=%u range=%ux%u cascade=%u start=%d\n",
+          s.info.fw_ver, s.info.pid, s.info.super_res, s.highRes16 ? 1u : 0u,
+          s.info.abs_x_max, s.info.abs_y_max, s.chip.cascade, rc);
+
+    const bool rangeOk = s.highRes16 ||
         (s.info.abs_x_max == 2944u && s.info.abs_y_max == 1840u) ||
-        (s.info.abs_x_max == 18400u && s.info.abs_y_max == 29440u);
+        (s.info.abs_x_max == 1840u && s.info.abs_y_max == 2944u);
     if (rc || (s.info.pid != 0x6068u && s.info.pid != 0x6067u) || !rangeOk)
         return stage(7, rc ? rc : -19);
+
+    if (!gCalLockedByUser) {
+        if (s.highRes16) {
+            storeCalSnapshot({0u, TB371FC_TOUCH_RAW_X_MAX, 0u, TB371FC_TOUCH_RAW_Y_MAX, 1u, 0u, 1u}, false);
+        } else if (s.info.abs_x_max == 2944u && s.info.abs_y_max == 1840u) {
+            storeCalSnapshot({0u, 2944u, 0u, 1840u, 0u, 0u, 0u}, false);
+        } else {
+            storeCalSnapshot({0u, 1840u, 0u, 2944u, 1u, 0u, 1u}, false);
+        }
+    }
     armAttention(s);
     return stage(8);
 }
 
 void run(void *, wait_result_t) {
+    loadBootArgCal();
     Session *s = new Session;
     if (!s) { stage(0, -12); return; }
     if (!startBus(*s)) return;
@@ -259,41 +345,44 @@ void run(void *, wait_result_t) {
 
     unsigned idle = 0, watchdog = 0, errors = 0, published = 0, ticks = 0;
     unsigned badLogged = 0, goodLogged = 0;
+    Tb371fcTouchFrame lastFrame = {};
     uint8_t report[TB371FC_TOUCH_REPORT_BYTES] = {};
     for (;;) {
-        IOSleep(2);
+        // Poll every 1 ms while a contact is down so finger-lift and swipe velocity
+        // are delivered immediately without waiting 250 idle ticks (~500 ms).
+        IOSleep(published ? 1 : 2);
         if (++ticks % 5000 == 0) stage(8);
-        bool edge = (rd(s->irqPin.va, 12) & 1) != 0;
+        const bool edge = (rd(s->irqPin.va, 12) & 1) != 0;
         if (edge) { wr(s->irqPin.va, 12, 0); tb371fc_touch_edges = tb371fc_touch_edges + 1; }
-        if (!edge && ++idle < 250) continue;
+        if (!edge && !published && ++idle < 250) continue;
         idle = 0;
         rc = nvt_read_points(&s->chip, report + 1);
         tb371fc_touch_reads = tb371fc_touch_reads + 1;
         if (rc) {
             Tb371fcTouchFrame empty = {};
-            if (published) { publishFrame(*s, empty); published = 0; }
+            if (published) { publishFrame(empty); published = 0; lastFrame = empty; }
             if (++errors >= 3) { stage(9, rc); return; }
             continue;
         }
         errors = 0;
-        int recovery = tb371fc_touch_recovery(report, sizeof report);
+        const int recovery = tb371fc_touch_recovery(report, sizeof report);
         if (recovery) {
             tb371fc_touch_recoveries = tb371fc_touch_recoveries + 1;
             Tb371fcTouchFrame empty = {};
-            if (published) { publishFrame(*s, empty); published = 0; }
+            if (published) { publishFrame(empty); published = 0; lastFrame = empty; }
             if (recovery == 2 && ++watchdog >= 10) { watchdog = 0; if (!download(*s)) return; }
             continue;
         }
         watchdog = 0;
+        const uint16_t limX = s->highRes16 ? TB371FC_TOUCH_RAW_X_MAX : s->info.abs_x_max;
+        const uint16_t limY = s->highRes16 ? TB371FC_TOUCH_RAW_Y_MAX : s->info.abs_y_max;
         Tb371fcTouchFrame frame = {};
-        int dec = tb371fc_touch_decode_ex(report, sizeof report,
-                                          s->info.abs_x_max, s->info.abs_y_max, &frame);
+        int dec = tb371fc_touch_decode_ex(report, sizeof report, limX, limY, &frame);
         if (dec != 0 && !tb371fc_touch_checksum_ok(report, sizeof report)) {
-            /* Single immediate retry if SPI read collided with IC SRAM update. */
+            // Single immediate retry if SPI read collided with IC SRAM update.
             IODelay(200);
             if (nvt_read_points(&s->chip, report + 1) == 0) {
-                dec = tb371fc_touch_decode_ex(report, sizeof report,
-                                              s->info.abs_x_max, s->info.abs_y_max, &frame);
+                dec = tb371fc_touch_decode_ex(report, sizeof report, limX, limY, &frame);
             }
         }
         if (dec) {
@@ -308,18 +397,67 @@ void run(void *, wait_result_t) {
             continue;
         }
         tb371fc_touch_valid = tb371fc_touch_valid + 1;
-        if (frame.count && goodLogged < 5u) {
+        if (frame.count && goodLogged < 8u) {
             ++goodLogged;
-            IOLog("[TB371FC touch] ok#%u cnt=%u id=%u pos=(%u,%u) raw=%02x %02x %02x %02x %02x %02x\n",
+            uint16_t hx = 0, hy = 0;
+            const Tb371fcTouchCal cal = loadCalSnapshot();
+            tb371fc_touch_map_calibrated(frame.contacts[0].x, frame.contacts[0].y, &cal, &hx, &hy);
+            IOLog("[TB371FC touch] ok#%u cnt=%u id=%u raw=(%u,%u) hid=(%u,%u) bytes=%02x %02x %02x %02x %02x %02x\n",
                   goodLogged, frame.count, frame.contacts[0].id,
-                  frame.contacts[0].x, frame.contacts[0].y,
+                  frame.contacts[0].x, frame.contacts[0].y, hx, hy,
                   report[1], report[2], report[3], report[4], report[5], report[6]);
         }
-        if (frame.count || published) publishFrame(*s, frame);
-        published = frame.count;
+        if (frame.count == 0u) {
+            if (published) {
+                publishFrame(frame);
+                published = 0;
+                lastFrame = frame;
+            }
+        } else if (!published || edge || !sameFrame(frame, lastFrame)) {
+            publishFrame(frame);
+            published = frame.count;
+            lastFrame = frame;
+        }
     }
 }
 }  // namespace
+
+extern "C" void tb371fc_touch_snapshot(char *buf, size_t cap) {
+    if (!buf || !cap) return;
+    const Tb371fcTouchCal c = loadCalSnapshot();
+    const uint32_t ox0 = (gObsMinX <= gObsMaxX) ? gObsMinX : 0u;
+    const uint32_t ox1 = (gObsMinX <= gObsMaxX) ? gObsMaxX : 0u;
+    const uint32_t oy0 = (gObsMinY <= gObsMaxY) ? gObsMinY : 0u;
+    const uint32_t oy1 = (gObsMinY <= gObsMaxY) ? gObsMaxY : 0u;
+    snprintf(buf, cap,
+             "[usb] TB371FC_TOUCH: stg=%u err=%d fw=0x%02x pid=0x%04x sres=0x%02x h16=%u info=%ux%u "
+             "rds=%u ok=%u bad=%u edg=%u rec=%u cnt=%u raw=(%u,%u) hid=(%u,%u) "
+             "obs_x=[%u..%u] obs_y=[%u..%u] cal=[%u..%u,%u..%u,sw=%u,fx=%u,fy=%u]\r\n",
+             tb371fc_touch_stage, tb371fc_touch_error,
+             gDiagFwVer, gDiagPid, gDiagSuperRes, gDiagHighRes, gDiagInfoX, gDiagInfoY,
+             tb371fc_touch_reads, tb371fc_touch_valid, tb371fc_touch_bad,
+             tb371fc_touch_edges, tb371fc_touch_recoveries,
+             gLastCount, gLastRawX, gLastRawY, gLastHidX, gLastHidY,
+             ox0, ox1, oy0, oy1,
+             c.x_min, c.x_max, c.y_min, c.y_max, c.swap_xy, c.flip_x, c.flip_y);
+}
+
+extern "C" bool tb371fc_touch_set_cal(uint32_t xmin, uint32_t xmax, uint32_t ymin, uint32_t ymax,
+                                      int swap_xy, int flip_x, int flip_y) {
+    if (xmax <= xmin || ymax <= ymin || xmax > 65535u || ymax > 65535u) return false;
+    Tb371fcTouchCal c = loadCalSnapshot();
+    c.x_min = static_cast<uint16_t>(xmin);
+    c.x_max = static_cast<uint16_t>(xmax);
+    c.y_min = static_cast<uint16_t>(ymin);
+    c.y_max = static_cast<uint16_t>(ymax);
+    if (swap_xy >= 0) c.swap_xy = swap_xy ? 1u : 0u;
+    if (flip_x >= 0) c.flip_x = flip_x ? 1u : 0u;
+    if (flip_y >= 0) c.flip_y = flip_y ? 1u : 0u;
+    gObsMinX = 0xFFFFu; gObsMaxX = 0u;
+    gObsMinY = 0xFFFFu; gObsMaxY = 0u;
+    storeCalSnapshot(c, true);
+    return true;
+}
 
 extern "C" void tb371fc_touch_start(void) {
     static bool started = false;

@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: BSD-2-Clause-Patent */
 #include "Tb371fcTouchReport.h"
 
-#define TB371FC_TOUCH_X_MAX 18400u
-#define TB371FC_TOUCH_Y_MAX 29440u
+#define TB371FC_TOUCH_X_MAX TB371FC_TOUCH_RAW_X_MAX
+#define TB371FC_TOUCH_Y_MAX TB371FC_TOUCH_RAW_Y_MAX
 
 int
 tb371fc_touch_checksum_ok(const uint8_t *report, size_t length)
@@ -104,21 +104,45 @@ tb371fc_touch_decode(const uint8_t *report, size_t length,
 }
 
 void
+tb371fc_touch_map_calibrated(uint16_t raw_x, uint16_t raw_y,
+                             const Tb371fcTouchCal *cal,
+                             uint16_t *hid_x, uint16_t *hid_y)
+{
+  static const Tb371fcTouchCal default_cal = {
+    0u, TB371FC_TOUCH_X_MAX, 0u, TB371FC_TOUCH_Y_MAX, 1u, 0u, 1u
+  };
+  const Tb371fcTouchCal *c = cal ? cal : &default_cal;
+  const uint32_t x_min = c->x_min;
+  const uint32_t x_max = (c->x_max > c->x_min) ? c->x_max : (c->x_min + 1u);
+  const uint32_t y_min = c->y_min;
+  const uint32_t y_max = (c->y_max > c->y_min) ? c->y_max : (c->y_min + 1u);
+  const uint32_t x_span = x_max - x_min;
+  const uint32_t y_span = y_max - y_min;
+  uint32_t cx = raw_x < x_min ? 0u : (raw_x > x_max ? x_span : (uint32_t)raw_x - x_min);
+  uint32_t cy = raw_y < y_min ? 0u : (raw_y > y_max ? y_span : (uint32_t)raw_y - y_min);
+  uint32_t h_val = c->swap_xy ? cy : cx;
+  uint32_t h_span = c->swap_xy ? y_span : x_span;
+  uint32_t v_val = c->swap_xy ? cx : cy;
+  uint32_t v_span = c->swap_xy ? x_span : y_span;
+
+  if (c->flip_x)
+    h_val = h_span - h_val;
+  if (c->flip_y)
+    v_val = v_span - v_val;
+
+  if (hid_x != 0) {
+    *hid_x = (uint16_t)(((uint64_t)h_val * (TB371FC_HID_INPUT_X_MAX - 1u) +
+                         h_span / 2u) / h_span);
+  }
+  if (hid_y != 0) {
+    *hid_y = (uint16_t)(((uint64_t)v_val * (TB371FC_HID_INPUT_Y_MAX - 1u) +
+                         v_span / 2u) / v_span);
+  }
+}
+
+void
 tb371fc_touch_to_hid(uint16_t native_x, uint16_t native_y,
                      uint16_t *hid_x, uint16_t *hid_y)
 {
-  if (hid_x != 0) {
-    if (native_y > TB371FC_TOUCH_Y_MAX)
-      native_y = TB371FC_TOUCH_Y_MAX;
-    *hid_x = (uint16_t)(((uint32_t)native_y *
-                         (TB371FC_HID_INPUT_X_MAX - 1u) +
-                         TB371FC_TOUCH_Y_MAX / 2u) / TB371FC_TOUCH_Y_MAX);
-  }
-  if (hid_y != 0) {
-    if (native_x > TB371FC_TOUCH_X_MAX)
-      native_x = TB371FC_TOUCH_X_MAX;
-    *hid_y = (uint16_t)(((uint32_t)(TB371FC_TOUCH_X_MAX - native_x) *
-                         (TB371FC_HID_INPUT_Y_MAX - 1u) + TB371FC_TOUCH_X_MAX / 2u) /
-                        TB371FC_TOUCH_X_MAX);
-  }
+  tb371fc_touch_map_calibrated(native_x, native_y, 0, hid_x, hid_y);
 }

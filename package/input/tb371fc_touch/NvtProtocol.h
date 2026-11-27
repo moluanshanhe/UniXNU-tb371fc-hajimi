@@ -106,7 +106,7 @@ unsigned nvt_frame_counter(const uint8_t *frame);
 #define NVT_EVENT_FWINFO 0x78
 #define NVT_DOZE_DELAY_ADDR 0x113718
 struct nvt_fw_info {
-    uint8_t fw_ver, fw_type;
+    uint8_t fw_ver, fw_type, super_res;
     uint8_t x_num, y_num;
     uint16_t abs_x_max, abs_y_max, pid;
     int defaulted;                    // info block was inconsistent after retries

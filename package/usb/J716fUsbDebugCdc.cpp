@@ -67,6 +67,10 @@ extern volatile int native_touch_ys[12] __attribute__((weak_import));
 extern volatile int native_touch_ids[12] __attribute__((weak_import));
 extern void native_touch_published(void) __attribute__((weak_import));
 extern volatile uint32_t native_touch_injecting __attribute__((weak_import));
+extern void j716f_buttons_inject_mask(uint32_t mask) __attribute__((weak_import));
+extern void tb371fc_touch_snapshot(char *buf, size_t cap) __attribute__((weak_import));
+extern bool tb371fc_touch_set_cal(uint32_t xmin, uint32_t xmax, uint32_t ymin, uint32_t ymax,
+                                  int swap_xy, int flip_x, int flip_y) __attribute__((weak_import));
 
 volatile uint32_t j716f_usb_stage = 0;
 volatile uint32_t j716f_usb_events = 0;
@@ -634,7 +638,30 @@ static int scalePxX(uint32_t px) {
 
 static int scalePxY(uint32_t py) {
     if (py > 1840u) py = 1840u;
-    return static_cast<int>((py * 22859u + 920u) / 1840u);
+    return static_cast<int>((py * 20319u + 920u) / 1840u);
+}
+
+static volatile uint32_t gUsbPowerPulseBusy = 0;
+
+static void usbPowerPulseThread(void *, wait_result_t) {
+    if (&j716f_buttons_inject_mask) {
+        j716f_buttons_inject_mask(1u << 1);
+        IOSleep(80);
+        j716f_buttons_inject_mask(0u);
+    }
+    __atomic_store_n(&gUsbPowerPulseBusy, 0u, __ATOMIC_RELEASE);
+}
+
+static bool startUsbPowerPulse() {
+    if (!&j716f_buttons_inject_mask) return false;
+    if (__atomic_exchange_n(&gUsbPowerPulseBusy, 1u, __ATOMIC_ACQ_REL)) return false;
+    thread_t th = nullptr;
+    if (kernel_thread_start(usbPowerPulseThread, nullptr, &th) == KERN_SUCCESS && th) {
+        thread_deallocate(th);
+        return true;
+    }
+    __atomic_store_n(&gUsbPowerPulseBusy, 0u, __ATOMIC_RELEASE);
+    return false;
 }
 
 static void publishInjectedTouch(unsigned count, int id, int hx, int hy) {
@@ -858,6 +885,10 @@ static void handleCommand(TerminalSession &s, const char *raw) {
                      j716f_hid_events[4], j716f_hid_events[5], j716f_hid_events[6], j716f_hid_events[7]);
             s.reply.writeStr(buf);
         }
+        if (&tb371fc_touch_snapshot) {
+            tb371fc_touch_snapshot(buf, sizeof(buf));
+            s.reply.writeStr(buf);
+        }
         if (&native_touch_rows) {
             for (unsigned i = 0; i < 4; ++i) {
                 if (!native_touch_rows[i][0]) continue;
@@ -940,6 +971,45 @@ static void handleCommand(TerminalSession &s, const char *raw) {
         s.pendingRebootAction = action;
         IOLog("[J716F usb] %s\n", buf);
         s.reply.writeStr(buf);
+    } else if (strEq(raw, "touch.power") || strEq(raw, "button.power")) {
+        const bool ok = startUsbPowerPulse();
+        s.reply.writeStr(ok ? "[usb] BUTTON: power key pulse (80ms) started\r\n"
+                            : "[usb] BUTTON: power pulse unavailable/busy\r\n");
+    } else if (strEq(raw, "touch.cal")) {
+        if (&tb371fc_touch_snapshot) {
+            tb371fc_touch_snapshot(buf, sizeof(buf));
+            s.reply.writeStr(buf);
+        } else {
+            s.reply.writeStr("[usb] TB371FC_TOUCH: unavailable\r\n");
+        }
+    } else if (strStarts(raw, "touch.cal ")) {
+        const char *p = raw + 10;
+        bool ok1 = false, ok2 = false, ok3 = false, ok4 = false;
+        bool ok5 = false, ok6 = false, ok7 = false;
+        const uint32_t xmin = parseUint(p, &ok1);
+        const uint32_t xmax = parseUint(p, &ok2);
+        const uint32_t ymin = parseUint(p, &ok3);
+        const uint32_t ymax = parseUint(p, &ok4);
+        const uint32_t sw = parseUint(p, &ok5);
+        const uint32_t fx = parseUint(p, &ok6);
+        const uint32_t fy = parseUint(p, &ok7);
+        if (!ok1 || !ok2 || !ok3 || !ok4 || !&tb371fc_touch_set_cal) {
+            s.reply.writeStr("[usb] usage: touch.cal <xmin> <xmax> <ymin> <ymax> [swap 0|1] [flipx 0|1] [flipy 0|1]\r\n");
+        } else {
+            const bool setOk = tb371fc_touch_set_cal(
+                xmin, xmax, ymin, ymax,
+                ok5 ? static_cast<int>(sw) : -1,
+                ok6 ? static_cast<int>(fx) : -1,
+                ok7 ? static_cast<int>(fy) : -1);
+            if (!setOk) {
+                s.reply.writeStr("[usb] TOUCH: invalid calibration bounds\r\n");
+            } else if (&tb371fc_touch_snapshot) {
+                tb371fc_touch_snapshot(buf, sizeof(buf));
+                s.reply.writeStr(buf);
+            } else {
+                s.reply.writeStr("[usb] TOUCH: calibration updated\r\n");
+            }
+        }
     } else if (strEq(raw, "touch.unlock")) {
         const bool ok = startUsbTouchGesture(1472u, 1825u, 1472u, 700u, 320u);
         s.reply.writeStr(ok ? "[usb] TOUCH: unlock swipe (1472,1825)->(1472,700) started\r\n"

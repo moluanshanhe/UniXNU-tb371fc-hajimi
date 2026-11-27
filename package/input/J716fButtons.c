@@ -42,6 +42,14 @@ void native_buttons_set_sink(void (*callback)(void *, uint32_t), void *context) 
   __atomic_store_n(&g_btn_sink, callback, __ATOMIC_RELEASE);
 }
 
+void j716f_buttons_inject_mask(uint32_t mask) {
+  void (*cb)(void *, uint32_t) = __atomic_load_n(&g_btn_sink, __ATOMIC_ACQUIRE);
+  if (cb) {
+    cb(__atomic_load_n(&g_btn_sink_context, __ATOMIC_ACQUIRE), mask);
+    j716f_buttons_changes = j716f_buttons_changes + 1U;
+  }
+}
+
 static void publish_single_touch(unsigned count, int id, int x, int y) {
   native_touch_seq = native_touch_seq + 1U;
   __asm__ volatile("dmb ish" ::: "memory");

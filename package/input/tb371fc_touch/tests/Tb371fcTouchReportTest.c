@@ -43,12 +43,10 @@ int main(void) {
 
   /* 2. Tianma two-finger max-corner boundary (2944, 1840) + out-of-range rejection. */
   memset(rpt, 0, sizeof(rpt));
-  /* Slot 0: id=1, state=1, x=2944 (0xB80), y=1840 (0x730), w=0->1, p=0->1 */
   rpt[1] = (1u << 3) | 1u;
   rpt[2] = 0xB8u;
   rpt[3] = 0x73u;
   rpt[4] = 0x00u;
-  /* Slot 1: id=2, state=2, x=0, y=0, w=5, p=42 */
   rpt[7] = (2u << 3) | 2u;
   rpt[11] = 5u;
   rpt[12] = 42u;
@@ -60,12 +58,11 @@ int main(void) {
   assert(frame.contacts[1].id == 2u && frame.contacts[1].x == 0u && frame.contacts[1].y == 0u);
   assert(frame.contacts[1].width == 5u && frame.contacts[1].pressure == 42u);
 
-  /* Out-of-bounds x=2945 (0xB81) must be rejected. */
   rpt[4] = 0x10u;
   finalize_checksum(rpt);
   assert(tb371fc_touch_decode_ex(rpt, sizeof(rpt), 2944u, 1840u, &frame) == -1);
 
-  /* 3. High-res 16-bit big-endian report (18400x29440) via tb371fc_touch_decode. */
+  /* 3. Production *_6.bin 16-bit big-endian 10x super-res report (18400x29440). */
   memset(rpt, 0, sizeof(rpt));
   rpt[1] = (3u << 3) | 1u;
   rpt[2] = (uint8_t)(9200u >> 8);
@@ -91,15 +88,29 @@ int main(void) {
   assert(tb371fc_touch_recovery(rpt, sizeof(rpt)) == 1);
   assert(tb371fc_touch_decode_ex(rpt, sizeof(rpt), 2944u, 1840u, &frame) == -2);
 
+  memset(rpt, 0, sizeof(rpt));
   memset(rpt + 1, 0xFE, 6);
   assert(tb371fc_touch_recovery(rpt, sizeof(rpt)) == 2);
   assert(tb371fc_touch_decode_ex(rpt, sizeof(rpt), 2944u, 1840u, &frame) == -2);
 
-  /* 5. Portrait-to-landscape HID coordinate helper boundaries. */
+  /* 5. Portrait-to-landscape HID coordinate helper boundaries + midpoint. */
   tb371fc_touch_to_hid(0u, 0u, &hx, &hy);
   assert(hx == 0u && hy == TB371FC_HID_INPUT_Y_MAX - 1u);
   tb371fc_touch_to_hid(18400u, 29440u, &hx, &hy);
   assert(hx == TB371FC_HID_INPUT_X_MAX - 1u && hy == 0u);
+  tb371fc_touch_to_hid(9200u, 14720u, &hx, &hy);
+  assert(hx == 15240u && hy == 10160u);
+
+  /* 6. Explicit calibration window clamping & non-swapped landscape mode. */
+  {
+    const Tb371fcTouchCal cal = {100u, 2500u, 50u, 1650u, 0u, 0u, 0u};
+    tb371fc_touch_map_calibrated(50u, 10u, &cal, &hx, &hy);
+    assert(hx == 0u && hy == 0u);
+    tb371fc_touch_map_calibrated(2600u, 1700u, &cal, &hx, &hy);
+    assert(hx == TB371FC_HID_INPUT_X_MAX - 1u && hy == TB371FC_HID_INPUT_Y_MAX - 1u);
+    tb371fc_touch_map_calibrated(1300u, 850u, &cal, &hx, &hy);
+    assert(hx == 15240u && hy == 10160u);
+  }
 
   printf("Tb371fcTouchReportTest: PASS\n");
   return 0;

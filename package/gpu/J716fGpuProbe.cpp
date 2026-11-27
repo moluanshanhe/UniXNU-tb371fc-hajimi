@@ -1161,7 +1161,8 @@ void publishA650MetalAccelerator() {
         "backboardd,SpringBoard,mediaserverd,adrenoprobed,iconservicesagen,MTLCompilerServi,"
         "PosterBoard,chronod,MobileSlideShow,Preferences,MobileSafari,com.apple.WebKit,"
         "UserEventAgent,CARenderServer,WindowServer,WidgetRenderer_D,PhotosPosterProv,"
-        "CollectionsPoste");
+        "CollectionsPoste,KaleidoscopePost,AegirPoster,EmojiPosterExten,PridePosterExten,"
+        "AmbientPosterExt,GradientPosterEx,UnityPosterExten,WallpaperPoster");
     if (!accel->attach(IOService::getPlatform())) {
         accel->release();
         snprintf(row, cap, "METAL attach_err");

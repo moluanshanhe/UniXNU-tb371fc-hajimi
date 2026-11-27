@@ -330,7 +330,7 @@ int nvt_get_fw_info(struct nvt_chip *c, struct nvt_fw_info *info) {
         if ((uint8_t)(b[0]+b[1])!=0xff) continue;
         info->fw_ver=b[0];info->x_num=b[2];info->y_num=b[3];
         info->abs_x_max=(uint16_t)((b[4]<<8)|b[5]);info->abs_y_max=(uint16_t)((b[6]<<8)|b[7]);
-        info->fw_type=b[13];info->pid=(uint16_t)((b[35]<<8)|b[34]);
+        info->super_res=b[12];info->fw_type=b[13];info->pid=(uint16_t)((b[35]<<8)|b[34]);
         return 0;
     }
     info->defaulted=1;

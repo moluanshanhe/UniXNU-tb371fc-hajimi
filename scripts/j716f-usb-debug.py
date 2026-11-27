@@ -270,13 +270,20 @@ def wait_for_port(explicit_port: str | None, timeout_s: float) -> str:
         time.sleep(0.3)
 
 
-def open_serial(port: str):
+def open_serial(port: str, retry_s: float = 3.0):
     import serial
 
-    ser = serial.Serial(port, 115200, timeout=0.15)
-    ser.dtr = True
-    ser.rts = True
-    return ser
+    deadline = time.monotonic() + retry_s
+    while True:
+        try:
+            ser = serial.Serial(port, 115200, timeout=0.15)
+            ser.dtr = True
+            ser.rts = True
+            return ser
+        except serial.SerialException:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.25)
 
 
 def drain_initial(ser, demux: Gsc1StreamDemuxer, max_s: float = 3.5, idle_s: float = 0.6) -> None:
@@ -546,6 +553,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     pu = sub.add_parser("unlock", help="Inject bottom-edge Home bar swipe-up unlock gesture")
     pu.set_defaults(commands=["touch.unlock"], log=None, no_replay=True, cmd_timeout=2.0, func=cmd_exec)
+
+    ppw = sub.add_parser("power", help="Inject short Power button press (wake/sleep display)")
+    ppw.set_defaults(commands=["touch.power"], log=None, no_replay=True, cmd_timeout=2.0, func=cmd_exec)
 
     pt = sub.add_parser("tap", help="Inject synthetic tap at 2944x1840 pixel coordinates")
     pt.add_argument("x", type=int, help="X pixel coordinate (0..2944)")
