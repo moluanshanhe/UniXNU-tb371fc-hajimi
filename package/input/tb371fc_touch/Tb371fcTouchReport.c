@@ -35,11 +35,16 @@ tb371fc_touch_recovery(const uint8_t *report, size_t length)
 }
 
 int
-tb371fc_touch_decode(const uint8_t *report, size_t length,
-                     Tb371fcTouchFrame *frame)
+tb371fc_touch_decode_ex(const uint8_t *report, size_t length,
+                        uint16_t abs_x_max, uint16_t abs_y_max,
+                        Tb371fcTouchFrame *frame)
 {
   uint16_t seen = 0;
   unsigned slot;
+  const int packed12 = (abs_x_max > 0u && abs_y_max > 0u &&
+                        abs_x_max <= 4095u && abs_y_max <= 4095u);
+  const uint16_t x_lim = abs_x_max ? abs_x_max : TB371FC_TOUCH_X_MAX;
+  const uint16_t y_lim = abs_y_max ? abs_y_max : TB371FC_TOUCH_Y_MAX;
 
   if (report == 0 || frame == 0 || length < TB371FC_TOUCH_REPORT_BYTES)
     return -1;
@@ -55,6 +60,7 @@ tb371fc_touch_decode(const uint8_t *report, size_t length,
     const uint8_t id = state_and_id >> 3;
     const uint8_t state = state_and_id & 7u;
     uint16_t x, y;
+    uint8_t width, pressure;
     Tb371fcTouchContact *contact;
 
     if (state != 1u && state != 2u)
@@ -63,9 +69,18 @@ tb371fc_touch_decode(const uint8_t *report, size_t length,
         (seen & (uint16_t)(1u << (id - 1u))) != 0u)
       return -1;
 
-    x = (uint16_t)(((uint16_t)report[pos + 1u] << 8) | report[pos + 2u]);
-    y = (uint16_t)(((uint16_t)report[pos + 3u] << 8) | report[pos + 4u]);
-    if (x > TB371FC_TOUCH_X_MAX || y > TB371FC_TOUCH_Y_MAX)
+    if (packed12) {
+      x = (uint16_t)(((uint16_t)report[pos + 1u] << 4) | (report[pos + 3u] >> 4));
+      y = (uint16_t)(((uint16_t)report[pos + 2u] << 4) | (report[pos + 3u] & 0x0Fu));
+      width = report[pos + 4u] ? report[pos + 4u] : 1u;
+      pressure = report[pos + 5u] ? report[pos + 5u] : 1u;
+    } else {
+      x = (uint16_t)(((uint16_t)report[pos + 1u] << 8) | report[pos + 2u]);
+      y = (uint16_t)(((uint16_t)report[pos + 3u] << 8) | report[pos + 4u]);
+      width = report[pos + 5u] ? report[pos + 5u] : 1u;
+      pressure = report[99u + slot] ? report[99u + slot] : 1u;
+    }
+    if (x > x_lim || y > y_lim)
       return -1;
 
     seen |= (uint16_t)(1u << (id - 1u));
@@ -73,10 +88,19 @@ tb371fc_touch_decode(const uint8_t *report, size_t length,
     contact->id = id;
     contact->x = x;
     contact->y = y;
-    contact->width = report[pos + 5u] ? report[pos + 5u] : 1u;
-    contact->pressure = report[99u + slot] ? report[99u + slot] : 1u;
+    contact->width = width;
+    contact->pressure = pressure;
   }
   return 0;
+}
+
+int
+tb371fc_touch_decode(const uint8_t *report, size_t length,
+                     Tb371fcTouchFrame *frame)
+{
+  return tb371fc_touch_decode_ex(report, length,
+                                 TB371FC_TOUCH_X_MAX, TB371FC_TOUCH_Y_MAX,
+                                 frame);
 }
 
 void

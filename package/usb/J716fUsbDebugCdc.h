@@ -13,6 +13,7 @@ extern "C" {
 #endif
 
 void j716f_usb_debug_probe(void);
+void j716f_panic_reboot_bootloader(void);
 
 #ifdef __cplusplus
 }

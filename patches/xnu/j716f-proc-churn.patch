@@ -1,0 +1,130 @@
+diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -2136,6 +2136,118 @@
+ 	proc_unlock(p);
+ }
+ 
++/*
++ * J716F: name a respawn storm. Every process exit is counted per p_comm in a small table. A name reaching 8, 64, 128, 256 ...
++ * exits is reported with its last exit status, exit reason namespace/code and parent; every 1024 exits the six busiest names
++ * go to the boot log. Boot-arg j716f-churn=0 turns it off.
++ */
++#define J716F_CHURN_SLOTS 32
++#define J716F_CHURN_TOP 6
++struct j716f_churn_slot {
++	char     name[MAXCOMLEN + 1];
++	uint32_t count;
++	int      status;
++	uint32_t ns;
++	uint64_t code;
++	pid_t    ppid;
++};
++static struct j716f_churn_slot j716f_churn[J716F_CHURN_SLOTS];
++static uint32_t j716f_churn_total;
++static int j716f_churn_mode = -1;
++static LCK_GRP_DECLARE(j716f_churn_grp, "j716f_churn");
++static LCK_SPIN_DECLARE(j716f_churn_lock, &j716f_churn_grp);
++
++static void
++j716f_churn_note(proc_t p, int exitval)
++{
++	char name[MAXCOMLEN + 1];
++	char pname[MAXCOMLEN + 1];
++	char line[640];
++	struct j716f_churn_slot top[J716F_CHURN_TOP];
++	struct j716f_churn_slot *slot = NULL;
++	int used[J716F_CHURN_SLOTS];
++	uint32_t total, count, ns = 0;
++	uint64_t code = 0;
++	int report = 0, table = 0, victim = 0;
++	pid_t ppid = p->p_ppid;
++
++	if (j716f_churn_mode < 0) {
++		int mode = 1;
++		PE_parse_boot_argn("j716f-churn", &mode, sizeof(mode));
++		j716f_churn_mode = mode;
++	}
++	if (!j716f_churn_mode) {
++		return;
++	}
++	if (p->p_exit_reason != OS_REASON_NULL) {
++		ns = p->p_exit_reason->osr_namespace;
++		code = p->p_exit_reason->osr_code;
++	}
++	strlcpy(name, p->p_comm, sizeof(name));
++
++	lck_spin_lock(&j716f_churn_lock);
++	total = ++j716f_churn_total;
++	for (int i = 0; i < J716F_CHURN_SLOTS; i++) {
++		if (j716f_churn[i].count && !strncmp(j716f_churn[i].name, name, sizeof(name))) {
++			slot = &j716f_churn[i];
++			break;
++		}
++		if (j716f_churn[i].count < j716f_churn[victim].count) {
++			victim = i;
++		}
++	}
++	if (!slot) {
++		slot = &j716f_churn[victim];
++		bzero(slot, sizeof(*slot));
++		strlcpy(slot->name, name, sizeof(slot->name));
++	}
++	count = ++slot->count;
++	slot->status = exitval;
++	slot->ns = ns;
++	slot->code = code;
++	slot->ppid = ppid;
++	if (count == 8 || (count >= 64 && (count & (count - 1)) == 0)) {
++		report = 1;
++	}
++	if ((total & 1023) == 0) {
++		table = 1;
++		bzero(used, sizeof(used));
++		for (int k = 0; k < J716F_CHURN_TOP; k++) {
++			int best = -1;
++			for (int i = 0; i < J716F_CHURN_SLOTS; i++) {
++				if (!used[i] && j716f_churn[i].count && (best < 0 || j716f_churn[i].count > j716f_churn[best].count)) {
++					best = i;
++				}
++			}
++			if (best < 0) {
++				top[k].count = 0;
++				continue;
++			}
++			used[best] = 1;
++			top[k] = j716f_churn[best];
++		}
++	}
++	lck_spin_unlock(&j716f_churn_lock);
++
++	if (report) {
++		pname[0] = 0;
++		proc_name(ppid, pname, sizeof(pname));
++		printf("[J716F churn] %s exits=%u total=%u st=0x%x ns=%u code=0x%llx ppid=%d(%s)\n", name, count, total, exitval, ns,
++		    code, ppid, pname);
++	}
++	if (table) {
++		size_t at = (size_t)snprintf(line, sizeof(line), "[J716F churn] total=%u top:", total);
++		for (int k = 0; k < J716F_CHURN_TOP && at < sizeof(line); k++) {
++			if (!top[k].count) {
++				continue;
++			}
++			at += (size_t)snprintf(line + at, sizeof(line) - at, " %s=%u(st=0x%x ns=%u code=0x%llx pp=%d)", top[k].name,
++			    top[k].count, top[k].status, top[k].ns, top[k].code, top[k].ppid);
++		}
++		printf("%s\n", line);
++	}
++}
++
+ void
+ proc_exit(proc_t p)
+ {
+@@ -2192,6 +2304,7 @@
+ 	proc_unlock(p);
+ 	pid = proc_getpid(p);
+ 	exitval = p->p_xstat;
++	j716f_churn_note(p, exitval);
+ 	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_COMMON,
+ 	    BSDDBG_CODE(DBG_BSD_PROC, BSD_PROC_EXIT) | DBG_FUNC_START,
+ 	    pid, exitval, 0, 0, 0);

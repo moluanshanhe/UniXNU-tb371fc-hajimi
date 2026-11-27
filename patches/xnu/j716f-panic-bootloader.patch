@@ -1,0 +1,15 @@
+diff --git a/osfmk/arm64/machine_routines.c b/osfmk/arm64/machine_routines.c
+--- a/osfmk/arm64/machine_routines.c
++++ b/osfmk/arm64/machine_routines.c
+@@ -804,7 +804,11 @@
+ 		printf("MACH Reboot\n");
+ 		PEHaltRestart(kPERestartCPU);
+ 	} else {
++		extern void j716f_panic_reboot_bootloader(void) __attribute__((weak_import));
+ 		printf("CPU halted\n");
++		if (&j716f_panic_reboot_bootloader) {
++			j716f_panic_reboot_bootloader();
++		}
+ 		PEHaltRestart(kPEHaltCPU);
+ 	}
+ 	while (1) {

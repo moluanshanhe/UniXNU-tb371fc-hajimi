@@ -418,11 +418,13 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
 
     demux = Gsc1StreamDemuxer(on_text=on_text, on_frame=on_frame)
     with open_serial(port) as ser:
-        drain_initial(ser, demux, max_s=2.0, idle_s=0.4)
+        ser.write(b"log.off\r\n")
+        ser.flush()
+        drain_initial(ser, demux, max_s=1.2, idle_s=0.25)
         if args.max_edge:
             ser.write(f"screen.configure {args.max_edge} 2\r\n".encode("utf-8"))
             ser.flush()
-            time.sleep(0.2)
+            time.sleep(0.15)
         ser.write(b"screen.snapshot\r\n")
         ser.flush()
         deadline = time.monotonic() + args.timeout
@@ -430,6 +432,8 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
             chunk = ser.read(8192)
             if chunk:
                 demux.feed(chunk)
+        ser.write(b"log.on\r\n")
+        ser.flush()
 
     if not saved:
         print(
@@ -539,6 +543,45 @@ def build_parser() -> argparse.ArgumentParser:
 
     po = sub.add_parser("poweroff", help="Power off the tablet via PSCI_SYSTEM_OFF")
     po.set_defaults(target="off", func=cmd_reboot)
+
+    pu = sub.add_parser("unlock", help="Inject bottom-edge Home bar swipe-up unlock gesture")
+    pu.set_defaults(commands=["touch.unlock"], log=None, no_replay=True, cmd_timeout=2.0, func=cmd_exec)
+
+    pt = sub.add_parser("tap", help="Inject synthetic tap at 2944x1840 pixel coordinates")
+    pt.add_argument("x", type=int, help="X pixel coordinate (0..2944)")
+    pt.add_argument("y", type=int, help="Y pixel coordinate (0..1840)")
+    pt.add_argument("--ms", type=int, default=60, help="Hold duration in ms (default: 60)")
+    pt.set_defaults(
+        func=lambda a: cmd_exec(
+            argparse.Namespace(
+                port=a.port,
+                wait=a.wait,
+                commands=[f"touch.tap {a.x} {a.y} {a.ms}"],
+                log=None,
+                no_replay=True,
+                cmd_timeout=2.0,
+            )
+        )
+    )
+
+    psw = sub.add_parser("swipe", help="Inject synthetic swipe across 2944x1840 pixel coordinates")
+    psw.add_argument("x1", type=int, help="Start X (0..2944)")
+    psw.add_argument("y1", type=int, help="Start Y (0..1840)")
+    psw.add_argument("x2", type=int, help="End X (0..2944)")
+    psw.add_argument("y2", type=int, help="End Y (0..1840)")
+    psw.add_argument("--ms", type=int, default=300, help="Swipe duration in ms (default: 300)")
+    psw.set_defaults(
+        func=lambda a: cmd_exec(
+            argparse.Namespace(
+                port=a.port,
+                wait=a.wait,
+                commands=[f"touch.swipe {a.x1} {a.y1} {a.x2} {a.y2} {a.ms}"],
+                log=None,
+                no_replay=True,
+                cmd_timeout=2.0,
+            )
+        )
+    )
     return p
 
 

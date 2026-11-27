@@ -258,6 +258,7 @@ void run(void *, wait_result_t) {
     if (!download(*s)) return;
 
     unsigned idle = 0, watchdog = 0, errors = 0, published = 0, ticks = 0;
+    unsigned badLogged = 0, goodLogged = 0;
     uint8_t report[TB371FC_TOUCH_REPORT_BYTES] = {};
     for (;;) {
         IOSleep(2);
@@ -285,8 +286,35 @@ void run(void *, wait_result_t) {
         }
         watchdog = 0;
         Tb371fcTouchFrame frame = {};
-        if (tb371fc_touch_decode(report, sizeof report, &frame)) { tb371fc_touch_bad = tb371fc_touch_bad + 1; continue; }
+        int dec = tb371fc_touch_decode_ex(report, sizeof report,
+                                          s->info.abs_x_max, s->info.abs_y_max, &frame);
+        if (dec != 0 && !tb371fc_touch_checksum_ok(report, sizeof report)) {
+            /* Single immediate retry if SPI read collided with IC SRAM update. */
+            IODelay(200);
+            if (nvt_read_points(&s->chip, report + 1) == 0) {
+                dec = tb371fc_touch_decode_ex(report, sizeof report,
+                                              s->info.abs_x_max, s->info.abs_y_max, &frame);
+            }
+        }
+        if (dec) {
+            tb371fc_touch_bad = tb371fc_touch_bad + 1;
+            if (badLogged < 5u) {
+                ++badLogged;
+                IOLog("[TB371FC touch] bad#%u chk=%d r[1..8]=%02x %02x %02x %02x %02x %02x %02x %02x r[65]=%02x\n",
+                      badLogged, tb371fc_touch_checksum_ok(report, sizeof report),
+                      report[1], report[2], report[3], report[4],
+                      report[5], report[6], report[7], report[8], report[65]);
+            }
+            continue;
+        }
         tb371fc_touch_valid = tb371fc_touch_valid + 1;
+        if (frame.count && goodLogged < 5u) {
+            ++goodLogged;
+            IOLog("[TB371FC touch] ok#%u cnt=%u id=%u pos=(%u,%u) raw=%02x %02x %02x %02x %02x %02x\n",
+                  goodLogged, frame.count, frame.contacts[0].id,
+                  frame.contacts[0].x, frame.contacts[0].y,
+                  report[1], report[2], report[3], report[4], report[5], report[6]);
+        }
         if (frame.count || published) publishFrame(*s, frame);
         published = frame.count;
     }

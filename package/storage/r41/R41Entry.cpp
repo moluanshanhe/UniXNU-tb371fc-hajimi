@@ -811,7 +811,18 @@ constexpr uint32_t kL2Shift = 10;
 constexpr uint32_t kL2Count = 1U << kL2Shift;
 constexpr uint32_t kL2Mask = kL2Count - 1U;
 constexpr uint32_t kMaxL1 = 4112;  // Covers up to 4,210,688 blocks (>16 GiB + overlay header/bitmap)
-constexpr uint32_t kMaxResidentPages = 131072;  // 512 MiB hard cap
+constexpr uint32_t kDefaultResidentPages = 262144;  // 1024 MiB default sparse cap (0 UFS writes)
+uint32_t g_max_resident_pages = kDefaultResidentPages;
+
+uint32_t configuredMaxResidentPages() {
+  unsigned mb = 0;
+  if (PE_parse_boot_argn("j716f-ram-store-mb", &mb, sizeof(mb))) {
+    if (mb < 256u) mb = 256u;
+    if (mb > 1536u) mb = 1536u;
+    return mb * 256u;  // 256 * 4 KiB = 1 MiB
+  }
+  return kDefaultResidentPages;
+}
 
 IOLock *g_lock = nullptr;
 uint8_t ***g_l1 = nullptr;
@@ -936,12 +947,13 @@ __attribute__((weak)) int native_ufs_store_open(uint64_t blocks, uint64_t *first
     if (why) *why = "ram-store-oom";
     return 0;
   }
+  g_max_resident_pages = configuredMaxResidentPages();
   g_total_blocks = blocks;
   g_open = true;
   if (first) *first = 0;
   IOLockUnlock(g_lock);
   printf("[J716F r41] volatile RAM Data store opened: blocks=%llu cap=%uMiB (0 UFS writes)\n",
-         static_cast<unsigned long long>(blocks), (kMaxResidentPages * kBlockBytes) >> 20);
+         static_cast<unsigned long long>(blocks), (g_max_resident_pages * kBlockBytes) >> 20);
   return 1;
 }
 
@@ -1005,9 +1017,10 @@ __attribute__((weak)) int native_ufs_store_write(uint64_t block, uint32_t count,
     uint8_t *page = l2 ? l2[l2_idx] : nullptr;
     if (!page) {
       if (isAllZero(src_page)) continue;
-      if (g_resident_pages >= kMaxResidentPages) {
+      if (g_resident_pages >= g_max_resident_pages) {
         IOLockUnlock(g_lock);
-        printf("[J716F r41] volatile RAM Data store full (%u pages)\n", g_resident_pages);
+        printf("[J716F r41] volatile RAM Data store full (%u/%u pages)\n",
+               g_resident_pages, g_max_resident_pages);
         return 0;
       }
       if (!l2) {

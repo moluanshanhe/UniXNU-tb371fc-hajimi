@@ -60,6 +60,13 @@ extern char native_touch_rows[4][120] __attribute__((weak_import));
 extern volatile uint32_t j716f_buttons_changes __attribute__((weak_import));
 extern volatile uint32_t j716f_buttons_mask __attribute__((weak_import));
 extern volatile int j716f_buttons_error __attribute__((weak_import));
+extern volatile uint32_t native_touch_seq __attribute__((weak_import));
+extern volatile uint32_t native_touch_count __attribute__((weak_import));
+extern volatile int native_touch_xs[12] __attribute__((weak_import));
+extern volatile int native_touch_ys[12] __attribute__((weak_import));
+extern volatile int native_touch_ids[12] __attribute__((weak_import));
+extern void native_touch_published(void) __attribute__((weak_import));
+extern volatile uint32_t native_touch_injecting __attribute__((weak_import));
 
 volatile uint32_t j716f_usb_stage = 0;
 volatile uint32_t j716f_usb_events = 0;
@@ -558,6 +565,131 @@ static void usbRebootModeOp(bool doWrite, uint8_t ponReason, uint32_t imemReason
     }
 }
 
+// Pre-mapped MMIO pointers for lockless, allocation-free panic-to-bootloader recovery.
+static volatile uint32_t *gPanicPonObs = nullptr;
+static volatile uint32_t *gPanicPonChnl = nullptr;
+static volatile uint32_t *gPanicImemReason = nullptr;
+static volatile uint32_t gPanicBootloaderEnabled = 0;
+
+static void initPanicRebootMappings() {
+    unsigned enable = 1u;
+    PE_parse_boot_argn("j716f-panic-fb", &enable, sizeof(enable));
+    if (!enable) return;
+
+    IOMemoryMap *coreMap = nullptr;
+    IOMemoryMap *cnfgMap = nullptr;
+    volatile uint32_t *core = reinterpret_cast<volatile uint32_t *>(mapRangeUncached(J716F_SPMI_CORE_BASE, 0x2000u, coreMap));
+    volatile uint32_t *cnfg = reinterpret_cast<volatile uint32_t *>(mapRangeUncached(J716F_SPMI_CNFG_BASE, 0x2000u, cnfgMap));
+    int ponApid = -1;
+    if (core && cnfg) {
+        const uint32_t ver = core[0];
+        const uint32_t apids = core[1] & 0x7FFu;
+        if (ver >= 0x50000000u && ver < 0x70000000u && apids > 0u && apids <= J716F_SPMI_MAX_APIDS) {
+            for (uint32_t i = 0; i < apids; ++i) {
+                const uint32_t m = core[(J716F_SPMI_APID_MAP_OFF + 4u * i) / 4u];
+                if (!m || ((m >> 8) & 0xFFFu) != J716F_PM8150_PON_PPID) continue;
+                const int own = static_cast<int>(cnfg[(J716F_SPMI_CNFG_OWNER_OFF + 4u * i) / 4u] & 7u);
+                if (own == 0) {
+                    ponApid = static_cast<int>(i);
+                    break;
+                }
+            }
+        }
+    }
+    if (cnfgMap) cnfgMap->release();
+    if (coreMap) coreMap->release();
+
+    if (ponApid >= 0) {
+        IOMemoryMap *obsMap = nullptr;
+        IOMemoryMap *chMap = nullptr;
+        const uint64_t obsPhys = J716F_SPMI_OBSRVR_BASE + J716F_SPMI_OBS_APID_STRIDE * static_cast<uint64_t>(ponApid);
+        const uint64_t chPhys  = J716F_SPMI_CHNLS_BASE  + J716F_SPMI_CHNL_APID_STRIDE * static_cast<uint64_t>(ponApid);
+        const uintptr_t obsVa = mapRangeUncached(obsPhys & ~0xFFFULL, 0x1000u, obsMap);
+        const uintptr_t chVa  = mapRangeUncached(chPhys, 0x1000u, chMap);
+        if (obsVa && chVa) {
+            gPanicPonObs  = reinterpret_cast<volatile uint32_t *>(obsVa + (obsPhys & 0xFFFu));
+            gPanicPonChnl = reinterpret_cast<volatile uint32_t *>(chVa);
+        }
+    }
+    IOMemoryMap *imemMap = nullptr;
+    const uintptr_t imemVa = mapRangeUncached(J716F_IMEM_BASE, J716F_IMEM_SIZE, imemMap);
+    if (imemVa) {
+        gPanicImemReason = reinterpret_cast<volatile uint32_t *>(imemVa + J716F_IMEM_RESTART_REASON_OFF);
+    }
+    if (gPanicImemReason) {
+        __atomic_store_n(&gPanicBootloaderEnabled, 1u, __ATOMIC_RELEASE);
+    }
+}
+
+struct UsbTouchGesture {
+    uint32_t x1, y1, x2, y2, ms;
+};
+static volatile uint32_t gUsbTouchBusy = 0;
+static UsbTouchGesture gUsbTouchReq = {};
+
+static int scalePxX(uint32_t px) {
+    if (px > 2944u) px = 2944u;
+    return static_cast<int>((px * 30479u + 1472u) / 2944u);
+}
+
+static int scalePxY(uint32_t py) {
+    if (py > 1840u) py = 1840u;
+    return static_cast<int>((py * 22859u + 920u) / 1840u);
+}
+
+static void publishInjectedTouch(unsigned count, int id, int hx, int hy) {
+    if (!&native_touch_seq || !&native_touch_count || !&native_touch_xs ||
+        !&native_touch_ys || !&native_touch_ids || !&native_touch_published) {
+        return;
+    }
+    uint32_t seq = native_touch_seq;
+    if (seq & 1u) ++seq;
+    native_touch_seq = seq + 1u;
+    __asm__ volatile("dmb ish" ::: "memory");
+    native_touch_count = count;
+    if (count > 0u) {
+        native_touch_ids[0] = id;
+        native_touch_xs[0]  = hx;
+        native_touch_ys[0]  = hy;
+    }
+    __asm__ volatile("dmb ish" ::: "memory");
+    native_touch_seq = seq + 2u;
+    native_touch_published();
+}
+
+static void usbTouchGestureThread(void *, wait_result_t) {
+    const UsbTouchGesture g = gUsbTouchReq;
+    if (&native_touch_injecting) {
+        __atomic_store_n(&native_touch_injecting, 1u, __ATOMIC_RELEASE);
+    }
+    const int hx1 = scalePxX(g.x1), hy1 = scalePxY(g.y1);
+    const int hx2 = scalePxX(g.x2), hy2 = scalePxY(g.y2);
+    const uint32_t steps = (g.ms >= 20u) ? (g.ms / 10u) : 2u;
+    for (uint32_t i = 0; i <= steps; ++i) {
+        const int hx = hx1 + static_cast<int>((static_cast<int64_t>(hx2 - hx1) * i) / steps);
+        const int hy = hy1 + static_cast<int>((static_cast<int64_t>(hy2 - hy1) * i) / steps);
+        publishInjectedTouch(1u, 9, hx, hy);
+        IOSleep(10);
+    }
+    publishInjectedTouch(0u, 9, hx2, hy2);
+    if (&native_touch_injecting) {
+        __atomic_store_n(&native_touch_injecting, 0u, __ATOMIC_RELEASE);
+    }
+    __atomic_store_n(&gUsbTouchBusy, 0u, __ATOMIC_RELEASE);
+}
+
+static bool startUsbTouchGesture(uint32_t x1, uint32_t y1, uint32_t x2, uint32_t y2, uint32_t ms) {
+    if (__atomic_exchange_n(&gUsbTouchBusy, 1u, __ATOMIC_ACQ_REL)) return false;
+    gUsbTouchReq = {x1, y1, x2, y2, ms};
+    thread_t th = nullptr;
+    if (kernel_thread_start(usbTouchGestureThread, nullptr, &th) == KERN_SUCCESS && th) {
+        thread_deallocate(th);
+        return true;
+    }
+    __atomic_store_n(&gUsbTouchBusy, 0u, __ATOMIC_RELEASE);
+    return false;
+}
+
 static void replayKernelLog(TerminalSession &s) {
     if (!&PE_j716f_klog_read) {
         s.reply.writeStr("[usb] klog ring unavailable\r\n");
@@ -808,6 +940,42 @@ static void handleCommand(TerminalSession &s, const char *raw) {
         s.pendingRebootAction = action;
         IOLog("[J716F usb] %s\n", buf);
         s.reply.writeStr(buf);
+    } else if (strEq(raw, "touch.unlock")) {
+        const bool ok = startUsbTouchGesture(1472u, 1825u, 1472u, 700u, 320u);
+        s.reply.writeStr(ok ? "[usb] TOUCH: unlock swipe (1472,1825)->(1472,700) started\r\n"
+                            : "[usb] TOUCH: gesture busy\r\n");
+    } else if (strStarts(raw, "touch.tap")) {
+        const char *p = raw + 9;
+        bool ok1 = false, ok2 = false, ok3 = false;
+        const uint32_t x = parseUint(p, &ok1);
+        const uint32_t y = parseUint(p, &ok2);
+        uint32_t ms = parseUint(p, &ok3);
+        if (!ok3 || ms < 20u || ms > 2000u) ms = 60u;
+        if (!ok1 || !ok2) {
+            s.reply.writeStr("[usb] usage: touch.tap <x 0..2944> <y 0..1840> [ms]\r\n");
+        } else {
+            const bool ok = startUsbTouchGesture(x, y, x, y, ms);
+            snprintf(buf, sizeof(buf), "[usb] TOUCH: tap (%u,%u) %ums %s\r\n",
+                     x, y, ms, ok ? "started" : "busy");
+            s.reply.writeStr(buf);
+        }
+    } else if (strStarts(raw, "touch.swipe")) {
+        const char *p = raw + 11;
+        bool ok1 = false, ok2 = false, ok3 = false, ok4 = false, ok5 = false;
+        const uint32_t x1 = parseUint(p, &ok1);
+        const uint32_t y1 = parseUint(p, &ok2);
+        const uint32_t x2 = parseUint(p, &ok3);
+        const uint32_t y2 = parseUint(p, &ok4);
+        uint32_t ms = parseUint(p, &ok5);
+        if (!ok5 || ms < 20u || ms > 5000u) ms = 300u;
+        if (!ok1 || !ok2 || !ok3 || !ok4) {
+            s.reply.writeStr("[usb] usage: touch.swipe <x1> <y1> <x2> <y2> [ms]\r\n");
+        } else {
+            const bool ok = startUsbTouchGesture(x1, y1, x2, y2, ms);
+            snprintf(buf, sizeof(buf), "[usb] TOUCH: swipe (%u,%u)->(%u,%u) %ums %s\r\n",
+                     x1, y1, x2, y2, ms, ok ? "started" : "busy");
+            s.reply.writeStr(buf);
+        }
     } else {
         snprintf(buf, sizeof(buf), "[usb] unknown command: %s (try 'help')\r\n", raw);
         s.reply.writeStr(buf);
@@ -1173,6 +1341,28 @@ static void usbDebugThread(void *arg, wait_result_t waitResult) {
 
 } // namespace
 
+extern "C" void j716f_panic_reboot_bootloader(void) {
+    if (!__atomic_load_n(&gPanicBootloaderEnabled, __ATOMIC_ACQUIRE)) return;
+    // Give screen/serial console ~2.5s to flush panic diagnostics before resetting to Fastboot.
+    for (unsigned i = 0; i < 2500u; ++i) {
+        IODelay(1000);
+    }
+    if (gPanicPonObs && gPanicPonChnl) {
+        uint8_t prev = 0;
+        if (usbSpmiRead8(gPanicPonObs, J716F_PON_SOFT_RB_SPARE, &prev) == 0) {
+            const uint8_t next = static_cast<uint8_t>(
+                (prev & ~J716F_PON_REASON_MASK) |
+                ((J716F_PON_REASON_BOOTLOADER << J716F_PON_REASON_SHIFT) & J716F_PON_REASON_MASK));
+            (void)usbSpmiWrite8(gPanicPonChnl, J716F_PON_SOFT_RB_SPARE, next);
+        }
+    }
+    if (gPanicImemReason) {
+        *gPanicImemReason = J716F_IMEM_REASON_BOOTLOADER;
+    }
+    __asm__ volatile("dsb sy" ::: "memory");
+    (void)usbPsciCall(J716F_PSCI_SYSTEM_RESET, 0);
+}
+
 extern "C" void j716f_usb_debug_probe(void) {
     static int started = 0;
     unsigned enable = 0;
@@ -1182,6 +1372,7 @@ extern "C" void j716f_usb_debug_probe(void) {
     if (__atomic_exchange_n(&started, 1, __ATOMIC_ACQ_REL)) return;
     j716f_usb_stage = 1;
     usbVoteRpmhRailsOnce();
+    initPanicRebootMappings();
     thread_t th = nullptr;
     if (kernel_thread_start(usbDebugThread, nullptr, &th) == KERN_SUCCESS && th) {
         thread_deallocate(th);

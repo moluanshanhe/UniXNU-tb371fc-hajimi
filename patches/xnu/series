@@ -6,3 +6,6 @@ j716f-storage-dependency.patch
 j716f-power-probe-call.patch
 j716f-apfs-root-probe.patch
 j716f-skip-setup.patch
+j716f-proc-churn.patch
+j716f-jetsam-floor.patch
+j716f-panic-bootloader.patch

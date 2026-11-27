@@ -1631,7 +1631,8 @@ void runMode10And11Kmd() {
     }
 
     /* Register unused TB-J716F UEFI DRAM outside XNU's 3.5 GiB window (0xFFE00000..0x1DFE00000)
-     * as dedicated Write-Combined GPU VRAM pool (896 MiB total: 512 MiB @ 0xD0000000 + 384 MiB @ 0x1E0000000).
+     * as dedicated Write-Combined GPU VRAM pool (864 MiB total: 512 MiB @ 0xD0000000 + 352 MiB @ 0x1E0000000,
+     * leaving top 32 MiB 0x1F6000000..0x1F8000000 untouched for UEFI runtime data / EmuVariableNv).
      * Pool BOs map via NativeAdrenoPoolView with explicit kIOMapWriteCombineCache, bypassing the
      * xnu-10063 pageable-descriptor WC cache-mode trap and eliminating per-submit CPU dc cvac/civac. */
     bool poolActive = false;
@@ -1641,7 +1642,7 @@ void runMode10And11Kmd() {
         if (poolMode != 0u) {
             static const struct { uint64_t base; uint64_t bytes; } kPoolRuns[2] = {
                 {0xD0000000ULL, 0x20000000ULL},   /* 512 MiB verified UEFI XNU Window (Stage 1-6 DRAM) */
-                {0x1E0000000ULL, 0x18000000ULL},  /* 384 MiB verified UEFI High RAM tail (..0x1F8000000) */
+                {0x1E0000000ULL, 0x16000000ULL},  /* 352 MiB verified UEFI High RAM (..0x1F6000000, 32 MiB guard) */
             };
             for (const auto &r : kPoolRuns) {
                 const IOReturn prc = native_adreno_pool_add(r.base, r.bytes);

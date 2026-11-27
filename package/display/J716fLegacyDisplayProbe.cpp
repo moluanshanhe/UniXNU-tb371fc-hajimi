@@ -35,6 +35,7 @@ extern "C" void native_gop_presenter_set_source(IOService *presenter, IOService 
 extern "C" void j716f_keystore_probe(void);
 extern "C" void j716f_hid_input_probe(void);
 extern "C" void j716f_usb_debug_probe(void);
+extern "C" volatile uint32_t j716f_usb_configured;
 extern "C" void j716f_touch_probe(void);
 extern "C" void tb371fc_touch_start(void);
 extern "C" void j716f_buttons_probe(void);
@@ -306,6 +307,16 @@ void native_legacy_display_late_probe(void) {
   j716f_keystore_probe();
   j716f_hid_input_probe();
   j716f_usb_debug_probe();
+  {
+    unsigned usb_en = 0;
+    if (PE_parse_boot_argn("j716f-usb", &usb_en, sizeof(usb_en)) && usb_en) {
+      // Allow up to 2.5s for host USB CDC enumeration before GPU/storage bringup
+      // so early kernel logs and panic diagnostics are always reachable on COM4.
+      for (unsigned w = 0; w < 250u && !j716f_usb_configured; ++w) {
+        IOSleep(10);
+      }
+    }
+  }
   j716f_touch_probe();
   tb371fc_touch_start();
   j716f_buttons_probe();

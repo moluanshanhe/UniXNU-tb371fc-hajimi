@@ -1,0 +1,30 @@
+diff --git a/osfmk/kern/task.c b/osfmk/kern/task.c
+--- a/osfmk/kern/task.c
++++ b/osfmk/kern/task.c
+@@ -7378,6 +7378,26 @@
+ 	boolean_t memlimit_is_active,
+ 	boolean_t memlimit_is_fatal)
+ {
++	/* J716F: Mesa Turnip + NIR + metal2vulkan and DYLD text-fixup unnesting add ~60-110 MB
++	 * of legitimate in-process footprint to Metal/system daemons (mediaserverd=75MB,
++	 * WidgetRenderer=98MB, PhotosPosterProvider=15MB, driverkitd=6MB). Raise small positive
++	 * per-task footprint caps to j716f-jetsam-floor (default 256 MB; 0 disables). */
++	if (new_limit_mb > 0) {
++		static int j716f_jetsam_floor_mb = -1;
++		if (j716f_jetsam_floor_mb < 0) {
++			int floor_mb = 256;
++			PE_parse_boot_argn("j716f-jetsam-floor", &floor_mb, sizeof(floor_mb));
++			if (floor_mb < 0) {
++				floor_mb = 0;
++			} else if (floor_mb > 1024) {
++				floor_mb = 1024;
++			}
++			j716f_jetsam_floor_mb = floor_mb;
++		}
++		if (new_limit_mb < j716f_jetsam_floor_mb) {
++			new_limit_mb = j716f_jetsam_floor_mb;
++		}
++	}
+ 	ledger_amount_t old;
+ 	kern_return_t ret;
+ #if DEVELOPMENT || DEBUG

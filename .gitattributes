@@ -5,5 +5,8 @@
 *.md text eol=lf
 /workspace/**/*.md -text
 *.py text eol=lf
+*.patch text eol=lf
+*.sh text eol=lf
+/patches/** text eol=lf
 /workspace/**/*.py -text
 /overlays/**/*.py -text

@@ -1132,10 +1132,46 @@ def main() -> None:
         encoding='utf-8',
     )
 
+    xnu17_cpu_pool_compat = OUT / 'j716f_xnu17_cpu_pool_compat.h'
+    xnu17_cpu_pool_compat.write_text(
+        '#pragma once\n'
+        '#include <IOKit/IOMemoryDescriptor.h>\n'
+        '#include <stdint.h>\n'
+        '#include <stddef.h>\n'
+        '// ARMv8.2-A Kryo 585 (Cortex-A77/A55) faults with Alignment Fault (DFSC=0x21) if XNU\n'
+        '// bzero() executes `dc zva` on kIOMapWriteCombineCache (MAIR 0x44 Normal Non-Cacheable).\n'
+        '// Zero pool runs via 64-byte paired stores (stp xzr, xzr) instead of `dc zva`.\n'
+        'static inline void j716f_wc_zero_64(void *dst, size_t bytes) {\n'
+        '    uint64_t *p = static_cast<uint64_t *>(dst);\n'
+        '    size_t n = bytes;\n'
+        '    while (n >= 64u) {\n'
+        '        __asm__ volatile(\n'
+        '            "stp xzr, xzr, [%0, #0]\\n\\t"\n'
+        '            "stp xzr, xzr, [%0, #16]\\n\\t"\n'
+        '            "stp xzr, xzr, [%0, #32]\\n\\t"\n'
+        '            "stp xzr, xzr, [%0, #48]"\n'
+        '            :\n'
+        '            : "r"(p)\n'
+        '            : "memory");\n'
+        '        p += 8;\n'
+        '        n -= 64u;\n'
+        '    }\n'
+        '    volatile uint8_t *b = reinterpret_cast<volatile uint8_t *>(p);\n'
+        '    while (n--) {\n'
+        '        *b++ = 0u;\n'
+        '    }\n'
+        '}\n'
+        '#undef bzero\n'
+        '#define bzero(dst, len) j716f_wc_zero_64((dst), (len))\n',
+        encoding='utf-8',
+    )
+
     for kmd_src, kmd_obj in zip(adreno740_kmd_srcs, adreno740_kmd_objs):
         extra = gpu_kmd_inc + ['-Wno-overloaded-virtual']
         if kmd_src.name == 'NativeAdrenoUserClient.cpp':
             extra = extra + ['-include', str(xnu17_gpu_compat)]
+        elif kmd_src.name == 'NativeAdrenoCpu.cpp':
+            extra = extra + ['-include', str(xnu17_cpu_pool_compat)]
         compile_cxx_from_record(
             record,
             kmd_src,

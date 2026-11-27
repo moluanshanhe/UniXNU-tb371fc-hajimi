@@ -31,6 +31,12 @@ extern "C" {
 /* Returns 0 for a valid frame and -1 for malformed input. */
 int tb371fc_touch_decode(const uint8_t *report, size_t length,
                          Tb371fcTouchFrame *frame);
+/* Decode using firmware-reported coordinate bounds: uses standard Novatek
+ * 12-bit packed slots when abs_x_max <= 4095 && abs_y_max <= 4095 (e.g.
+ * Tianma 2944x1840), and 16-bit big-endian slots for high-res 18400x29440. */
+int tb371fc_touch_decode_ex(const uint8_t *report, size_t length,
+                            uint16_t abs_x_max, uint16_t abs_y_max,
+                            Tb371fcTouchFrame *frame);
 
 /* Reports include one SPI dummy byte before the 108-byte Novatek payload. */
 int tb371fc_touch_checksum_ok(const uint8_t *report, size_t length);
