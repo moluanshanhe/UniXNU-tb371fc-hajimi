@@ -119,7 +119,7 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             UniXNU/build/adreno-metal-bridge/ios
-          key: j716f-gpu-bridge-${{ runner.os }}-1.98.0-e7bddb9a-a650-v3
+          key: j716f-gpu-bridge-${{ runner.os }}-1.98.0-e7bddb9a-a650-v4
           restore-keys: |
             j716f-gpu-bridge-${{ runner.os }}-1.98.0-e7bddb9a-
             j716f-gpu-bridge-${{ runner.os }}-1.98.0-
@@ -370,6 +370,31 @@ jobs:
           assert opt_anchor in fl_txt, 'Expected OPTIONAL table in floor.rs'
           fl_txt = fl_txt.replace(req_line, '', 1).replace(opt_anchor, opt_anchor + req_line, 1)
           floor_rs.write_text(fl_txt)
+          tex_rs = m2v / 'crates/metal2vulkan-runtime/src/texture.rs'
+          tx_txt = tex_rs.read_text()
+          att_old = (
+              '        let d = &self.object().descriptor;\n'
+              '        if !d.usage.is_empty() && !d.usage.contains(TextureUsage::RENDER_TARGET) {\n'
+              '            return Err(Error::Refused(Refusal::AttachmentUsage {\n'
+              '                pixel_format: d.pixel_format,\n'
+              '            }));\n'
+              '        }\n'
+          )
+          att_new = (
+              '        let d = &self.object().descriptor;\n'
+              '        let renders =\n'
+              '            vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT;\n'
+              '        if !d.usage.is_empty()\n'
+              '            && !d.usage.contains(TextureUsage::RENDER_TARGET)\n'
+              '            && !self.object().image_of().is_some_and(|image| image.usage.intersects(renders))\n'
+              '        {\n'
+              '            return Err(Error::Refused(Refusal::AttachmentUsage {\n'
+              '                pixel_format: d.pixel_format,\n'
+              '            }));\n'
+              '        }\n'
+          )
+          assert tx_txt.count(att_old) == 1, 'Expected single AttachmentUsage guard in texture.rs'
+          tex_rs.write_text(tx_txt.replace(att_old, att_new, 1))
           patches_dir = Path('drivers/AdrenoMetal/bridge/patches')
           patches_dir.mkdir(parents=True, exist_ok=True)
           patch_out = patches_dir / '0001-a650-optional-storage-8bit.patch'
