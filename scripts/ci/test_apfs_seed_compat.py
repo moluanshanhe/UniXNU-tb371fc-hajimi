@@ -40,9 +40,26 @@ class DiscoveryTests(unittest.TestCase):
 
     def test_first_entity_not_guessed(self):
         for entry in ({}, {'system-entities': [{'dev-entry': '/dev/disk9s1'}]},
-                      {'system-entities': [{'dev-entry': '/dev/rdisk9'}]}):
+                      {'system-entities': [{'dev-entry': '/dev/rdisk9'}]},
+                      {'system-entities': [
+                          {'content-hint': compat.APFS_CONTAINER_HINT, 'dev-entry': '/dev/disk8'},
+                          {'dev-entry': '/dev/disk7'},
+                          {'dev-entry': '/dev/disk6'},
+                      ]}):
             with self.assertRaises(RuntimeError):
                 compat.attachment_store(entry)
+
+    def test_macos26_reversed_entity_order_selects_backing_whole_disk(self):
+        attached = {
+            'system-entities': [
+                {'content-hint': '41504653-0000-11AA-AA11-00306543ECAC', 'dev-entry': '/dev/disk8s1',
+                 'potentially-mountable': True, 'volume-kind': 'apfs'},
+                {'content-hint': 'EF57347C-0000-11AA-AA11-00306543ECAC', 'dev-entry': '/dev/disk8',
+                 'potentially-mountable': False},
+                {'dev-entry': '/dev/disk7', 'potentially-mountable': False},
+            ]
+        }
+        self.assertEqual(compat.attachment_store(attached), 'disk7')
 
     def test_owned_path_must_be_unique_and_device_unchanged(self):
         raw = Path('specific-seed.raw').resolve()

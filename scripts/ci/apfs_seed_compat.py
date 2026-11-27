@@ -92,12 +92,27 @@ def plist_command(*args, timeout=30):
     return plistlib.loads(result.stdout)
 
 
+APFS_CONTAINER_HINT = 'EF57347C-0000-11AA-AA11-00306543ECAC'
+
+
+def entity_hint(entry):
+    return str(entry.get('content-hint') or entry.get('unmapped-content-hint') or '').upper()
+
+
 def attachment_store(attached):
     entities = attached.get('system-entities', [])
-    require(entities and isinstance(entities[0], dict), 'No first image attachment entity')
+    require(entities and all(isinstance(e, dict) for e in entities), 'Invalid image attachment entities')
+    has_synth = any(entity_hint(e) == APFS_CONTAINER_HINT for e in entities)
+    backing = [e.get('dev-entry', '') for e in entities
+               if re.fullmatch(r'/dev/disk\d+', e.get('dev-entry', '')) and
+               entity_hint(e) != APFS_CONTAINER_HINT]
+    if has_synth:
+        # macOS 26 hdiutil attach -plist may emit APFS volume/synthesized container
+        # entities before the raw image's backing whole disk; require a unique
+        # non-synthesized whole disk owned by this attachment.
+        require(len(backing) == 1, 'Expected exactly one backing whole disk in image attachment')
+        return backing[0].removeprefix('/dev/')
     device = entities[0].get('dev-entry', '')
-    # Preserve the old first-whole-disk rule. Do not infer a parent by prefix or
-    # select a partition/synthesized device to make an unmatched result pass.
     require(re.fullmatch(r'/dev/disk\d+', device), 'First image entity is not a whole disk')
     return device.removeprefix('/dev/')
 

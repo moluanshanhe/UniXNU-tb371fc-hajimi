@@ -120,9 +120,15 @@ def image_entries(log):
     return log.command('hdiutil', 'info', '-plist', plist=True).get('images', [])
 
 
+APFS_CONTAINER_HINT = 'EF57347C-0000-11AA-AA11-00306543ECAC'
+
+
 def whole_disk(entry):
-    devices = [item.get('dev-entry', '') for item in entry.get('system-entities', [])]
-    matches = [d for d in devices if re.fullmatch(r'/dev/disk\d+', d)]
+    items = [item for item in entry.get('system-entities', [])
+             if isinstance(item, dict) and re.fullmatch(r'/dev/disk\d+', item.get('dev-entry', ''))]
+    backing = [item['dev-entry'] for item in items
+               if str(item.get('content-hint') or item.get('unmapped-content-hint') or '').upper() != APFS_CONTAINER_HINT]
+    matches = backing or [item['dev-entry'] for item in items]
     require(matches, 'No whole image attachment device in hdiutil result')
     return matches[0]
 
